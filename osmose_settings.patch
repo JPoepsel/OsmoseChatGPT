@@ -1,0 +1,96 @@
+diff --git a/data/index.html b/data/index.html
+index 0000000..1111111 100644
+--- a/data/index.html
++++ b/data/index.html
+@@ -33,7 +33,27 @@
+ </section>
+
+ <section id="set" hidden>
+-<h3>Settings coming next step</h3>
++<h3>Settings</h3>
++
++<div class="grid">
++  <label>In pulses/L
++    <input id="calIn" type="number">
++  </label>
++  <label>Out pulses/L
++    <input id="calOut" type="number">
++  </label>
++  <label>Prepare ms
++    <input id="prep" type="number">
++  </label>
++  <label>Flush timeout ms
++    <input id="flush" type="number">
++  </label>
++</div>
++
++<button class="start" onclick="saveSettings()">Save</button>
+ </section>
+
+ <script src="app.js"></script>
+diff --git a/data/app.js b/data/app.js
+index 0000000..1111111 100644
+--- a/data/app.js
++++ b/data/app.js
+@@ -20,6 +20,15 @@ ws.onmessage = e => {
+   left.innerText=d.left.toFixed(2);
+
+   addChart(d.tds);
++
++  if(d.cfg){
++    calIn.value  = d.cfg.in;
++    calOut.value = d.cfg.out;
++    prep.value   = d.cfg.prep;
++    flush.value  = d.cfg.flush;
++  }
+ };
+
+@@ -44,3 +53,14 @@ window.onload=()=>{
+   });
+ };
++
++function saveSettings(){
++  ws.send(JSON.stringify({
++    cmd:"save",
++    in:parseInt(calIn.value),
++    out:parseInt(calOut.value),
++    prep:parseInt(prep.value),
++    flush:parseInt(flush.value)
++  }));
++}
+diff --git a/src/web.cpp b/src/web.cpp
+index 0000000..1111111 100644
+--- a/src/web.cpp
++++ b/src/web.cpp
+@@ -46,6 +46,17 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
+   if(m=="start") webRequestStart();
+   if(m=="stop")  webRequestStop();
++
++  if(m.startsWith("{")){
++    StaticJsonDocument<128> doc;
++    if(!deserializeJson(doc,m)){
++      if(doc["cmd"]=="save"){
++        WEBDBG("[WEB] settings received\n");
++      }
++    }
++  }
+ }
+diff --git a/data/style.css b/data/style.css
+index 0000000..1111111 100644
+--- a/data/style.css
++++ b/data/style.css
+@@
+ .grid{
+   display:grid;
+   grid-template-columns:1fr 1fr;
+   gap:15px;
+   font-size:20px;
+   margin-bottom:20px;
+ }
++
++input{
++  width:100%;
++  padding:8px;
++  border-radius:8px;
++  border:none;
++}

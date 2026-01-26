@@ -1,0 +1,27 @@
+body{
+  background:#121212;
+  color:#eee;
+  font-family:sans-serif;
+  padding:15px;
+}
+
+nav{display:flex;gap:10px;margin-bottom:15px;}
+
+button{
+  padding:10px 16px;
+  border:none;
+  border-radius:12px;
+  background:#3a86ff;
+  color:white;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:15px;
+  font-size:20px;
+  margin-bottom:20px;
+}
+
+.start{background:#2ecc71;}
+.stop{background:#e74c3c;}

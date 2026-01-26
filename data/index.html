@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<title>Osmose Controller</title>
+</head>
+<body>
+
+<nav>
+<button onclick="show('home')">Home</button>
+<button onclick="show('hist')">History</button>
+<button onclick="show('set')">Settings</button>
+</nav>
+
+<section id="home">
+<h2 id="state">IDLE</h2>
+
+<div class="grid">
+<div>TDS <b id="tds">0</b></div>
+<div>Liter <b id="liters">0</b></div>
+<div>Flow L/min <b id="flow">0</b></div>
+<div>Rest <b id="left">0</b></div>
+</div>
+
+<button class="start" onclick="ws.send('start')">Start</button>
+<button class="stop" onclick="ws.send('stop')">Stop</button>
+</section>
+
+<section id="hist" hidden>
+<canvas id="chart"></canvas>
+</section>
+
+<section id="set" hidden>
+<h3>Settings coming next step</h3>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
