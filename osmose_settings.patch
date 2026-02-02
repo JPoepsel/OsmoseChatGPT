@@ -1,96 +1,96 @@
-diff --git a/data/index.html b/data/index.html
-index 0000000..1111111 100644
---- a/data/index.html
-+++ b/data/index.html
-@@ -33,7 +33,27 @@
- </section>
-
- <section id="set" hidden>
--<h3>Settings coming next step</h3>
-+<h3>Settings</h3>
+diff --git a/src/config_settings.h b/src/config_settings.h
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/config_settings.h
+@@ -0,0 +1,30 @@
++#pragma once
++#include <ArduinoJson.h>
 +
-+<div class="grid">
-+  <label>In pulses/L
-+    <input id="calIn" type="number">
-+  </label>
-+  <label>Out pulses/L
-+    <input id="calOut" type="number">
-+  </label>
-+  <label>Prepare ms
-+    <input id="prep" type="number">
-+  </label>
-+  <label>Flush timeout ms
-+    <input id="flush" type="number">
-+  </label>
-+</div>
++extern DynamicJsonDocument configDoc;
++bool configLoad();
++bool configSave();
 +
-+<button class="start" onclick="saveSettings()">Save</button>
- </section>
-
- <script src="app.js"></script>
-diff --git a/data/app.js b/data/app.js
-index 0000000..1111111 100644
---- a/data/app.js
-+++ b/data/app.js
-@@ -20,6 +20,15 @@ ws.onmessage = e => {
-   left.innerText=d.left.toFixed(2);
-
-   addChart(d.tds);
++#define CFG(key,def) (configDoc[key] | def)
 +
-+  if(d.cfg){
-+    calIn.value  = d.cfg.in;
-+    calOut.value = d.cfg.out;
-+    prep.value   = d.cfg.prep;
-+    flush.value  = d.cfg.flush;
-+  }
- };
-
-@@ -44,3 +53,14 @@ window.onload=()=>{
-   });
- };
++extern float producedLiters;
++void prodAdd(float d);
++void prodCheckLimit(bool isManualMode);
++void prodHandleResets(bool lowSwitch,bool switchOffToOn);
 +
-+function saveSettings(){
-+  ws.send(JSON.stringify({
-+    cmd:"save",
-+    in:parseInt(calIn.value),
-+    out:parseInt(calOut.value),
-+    prep:parseInt(prep.value),
-+    flush:parseInt(flush.value)
-+  }));
-+}
-diff --git a/src/web.cpp b/src/web.cpp
-index 0000000..1111111 100644
---- a/src/web.cpp
-+++ b/src/web.cpp
-@@ -46,6 +46,17 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
-   if(m=="start") webRequestStart();
-   if(m=="stop")  webRequestStop();
-+
-+  if(m.startsWith("{")){
-+    StaticJsonDocument<128> doc;
-+    if(!deserializeJson(doc,m)){
-+      if(doc["cmd"]=="save"){
-+        WEBDBG("[WEB] settings received\n");
-+      }
-+    }
-+  }
- }
-diff --git a/data/style.css b/data/style.css
-index 0000000..1111111 100644
---- a/data/style.css
-+++ b/data/style.css
-@@
- .grid{
-   display:grid;
-   grid-template-columns:1fr 1fr;
-   gap:15px;
-   font-size:20px;
-   margin-bottom:20px;
- }
-+
-+input{
-+  width:100%;
-+  padding:8px;
-+  border-radius:8px;
-+  border:none;
-+}
++diff --git a/src/config_settings.cpp b/src/config_settings.cpp
++new file mode 100644
++index 0000000..1111111
++--- /dev/null
+++++ b/src/config_settings.cpp
++@@ -0,0 +1,120 @@
+++#include "config_settings.h"
+++#include <SPIFFS.h>
+++
+++DynamicJsonDocument configDoc(2048);
+++
+++float producedLiters = 0.0f;
+++static bool productionLockedManual = false;
+++static bool productionLockedAuto   = false;
+++static bool lastLowSwitch = false;
+++
+++bool configLoad(){
+++  if(!SPIFFS.exists("/config.json")){
+++    Serial.println("[CFG] no config.json -> defaults");
+++    return false;
+++  }
+++  File f = SPIFFS.open("/config.json","r");
+++  if(!f) return false;
+++  auto e = deserializeJson(configDoc,f);
+++  f.close();
+++  if(e){
+++    Serial.println("[CFG] load failed");
+++    return false;
+++  }
+++  Serial.println("[CFG] loaded");
+++  return true;
+++}
+++
+++bool configSave(){
+++  File f = SPIFFS.open("/config.json","w");
+++  if(!f) return false;
+++  serializeJsonPretty(configDoc,f);
+++  f.close();
+++  Serial.println("[CFG] saved");
+++  return true;
+++}
+++
+++void prodAdd(float d){
+++  producedLiters += d;
+++  Serial.printf("[PROD] +%.3fL total=%.3fL\n",d,producedLiters);
+++}
+++
+++void prodCheckLimit(bool isManualMode){
+++  float maxProd = CFG("maxProductionLiters",0.0f);
+++  if(maxProd<=0) return;
+++  if(producedLiters>=maxProd){
+++    Serial.println("[PROD] limit reached -> IDLE");
+++    setState(STATE_IDLE);
+++    if(isManualMode){
+++      productionLockedManual=true;
+++      Serial.println("[PROD] locked (manual)");
+++    }else{
+++      productionLockedAuto=true;
+++      Serial.println("[PROD] locked (auto)");
+++    }
+++  }
+++}
+++
+++void prodHandleResets(bool lowSwitch,bool switchOffToOn){
+++  if(productionLockedAuto && lastLowSwitch && !lowSwitch){
+++    producedLiters=0;
+++    productionLockedAuto=false;
+++    Serial.println("[PROD] auto reset");
+++  }
+++  if(productionLockedManual && switchOffToOn){
+++    producedLiters=0;
+++    productionLockedManual=false;
+++    Serial.println("[PROD] manual reset");
+++  }
+++  lastLowSwitch=lowSwitch;
+++}

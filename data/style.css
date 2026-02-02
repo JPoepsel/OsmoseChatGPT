@@ -1,27 +1,185 @@
-body{
-  background:#121212;
-  color:#eee;
-  font-family:sans-serif;
-  padding:15px;
+/* =========================================================
+   OSMOSE CONTROLLER – STYLE
+   modern dark responsive
+   ========================================================= */
+
+:root{
+  --bg:#121212;
+  --card:#1c1c1c;
+  --accent:#3a86ff;
+  --green:#2ecc71;
+  --red:#e74c3c;
+  --orange:#f39c12;
+  --text:#eeeeee;
+  --muted:#aaaaaa;
+  --radius:14px;
 }
 
-nav{display:flex;gap:10px;margin-bottom:15px;}
+
+/* =========================================================
+   BASE
+   ========================================================= */
+
+body{
+  margin:0;
+  padding:18px;
+
+  background:var(--bg);
+  color:var(--text);
+
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
+}
+
+
+/* =========================================================
+   NAV
+   ========================================================= */
+
+nav{
+  display:flex;
+  gap:10px;
+  margin-bottom:18px;
+}
+
+nav button{
+  flex:1;
+}
+
+
+/* =========================================================
+   BUTTONS
+   ========================================================= */
 
 button{
-  padding:10px 16px;
+  padding:12px 18px;
+
   border:none;
-  border-radius:12px;
-  background:#3a86ff;
+  border-radius:var(--radius);
+
+  background:var(--accent);
   color:white;
+
+  font-size:16px;
+  font-weight:600;
+
+  cursor:pointer;
+  transition:0.15s;
 }
+
+button:hover{
+  filter:brightness(1.1);
+}
+
+button:active{
+  transform:scale(0.97);
+}
+
+.start{
+  background:var(--green);
+}
+
+.stop{
+  background:var(--red);
+}
+
+.save{
+  background:var(--orange);
+  margin-top:10px;
+}
+
+
+/* =========================================================
+   HOME GRID
+   ========================================================= */
 
 .grid{
   display:grid;
   grid-template-columns:1fr 1fr;
-  gap:15px;
+  gap:14px;
+
+  margin:18px 0 22px 0;
+
   font-size:20px;
-  margin-bottom:20px;
 }
 
-.start{background:#2ecc71;}
-.stop{background:#e74c3c;}
+.grid div{
+  background:var(--card);
+  padding:18px;
+  border-radius:var(--radius);
+  text-align:center;
+}
+
+.grid b{
+  display:block;
+  font-size:26px;
+  margin-top:6px;
+}
+
+
+/* =========================================================
+   HEADINGS
+   ========================================================= */
+
+h2{
+  margin:8px 0 14px 0;
+  font-size:28px;
+  text-align:center;
+}
+
+h3{
+  margin:6px 0 14px 0;
+  color:var(--muted);
+}
+
+
+/* =========================================================
+   HISTORY CHART
+   ========================================================= */
+
+canvas{
+  background:var(--card);
+  border-radius:var(--radius);
+  padding:10px;
+}
+
+
+/* =========================================================
+   SETTINGS PAGE
+   ========================================================= */
+
+.settings{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+
+  max-width:300px;
+}
+
+.settings label{
+  display:flex;
+  flex-direction:column;
+  font-size:14px;
+  color:var(--muted);
+}
+
+.settings input{
+  margin-top:6px;
+
+  padding:10px;
+
+  border:none;
+  border-radius:10px;
+
+  background:var(--card);
+  color:var(--text);
+
+  font-size:16px;
+}
+
+
+/* =========================================================

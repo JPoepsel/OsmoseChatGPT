@@ -5,18 +5,15 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 
+bool webStartRequest=false;
+bool webStopRequest=false;
+
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 static uint32_t lastSend=0;
 
 #define WEBDBG(...) Serial.printf(__VA_ARGS__)
-
-// ===== ADD: hooks into main.cpp =====
-extern void webRequestStart();
-extern void webRequestStop();
-// ====================================
-
 
 // ============================================================
 // Broadcast full status
@@ -49,10 +46,8 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
 
   String m=String((char*)data).substring(0,len);
 
-  // ===== CHANGED =====
-  if(m=="start") webRequestStart();
-  if(m=="stop")  webRequestStop();
-  // ===================
+  if(m=="start") webStartRequest=true;
+  if(m=="stop")  webStopRequest=true;
 }
 
 // ============================================================
@@ -86,7 +81,7 @@ void webLoop(float tds, const char* stateName, float litersNow)
     lastT=millis();
   }
 
-  float left = 50.0 - litersNow;
+  float left = 50.0 - litersNow; // MAX_LITERS später parametrieren
 
   if(millis()-lastSend>300){
     wsBroadcast(tds,stateName,litersNow,flow,left);

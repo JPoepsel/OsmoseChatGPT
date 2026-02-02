@@ -58,7 +58,7 @@ bool wifiConnected=false;
 
 
 // ================= MQTT =================
-const char* MQTT_HOST="192.168.68.57";
+const char* MQTT_HOST="MyRasPi.local";
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
@@ -67,17 +67,6 @@ PubSubClient mqtt(wifiClient);
 const char* NTP_SERVER="pool.ntp.org";
 const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
-
-
-// ===== ADD: Web Start/Stop Flags =====
-bool webStartRequest=false;
-bool webStopRequest=false;
-bool webHold=false;   // ADD: verhindert Autostart nach Web-Stop
-
-
-void webRequestStart(){ webStartRequest=true; }
-void webRequestStop(){  webStopRequest=true; }
-// =====================================
 
 
 // ================= PINMAP (FIXIERT) =================
@@ -228,16 +217,26 @@ void IRAM_ATTR isrOut(){cntOut++;}
 // ============================================================
 // MQTT (ORIGINAL)
 // ============================================================
+
 void mqttReconnect(){
+
   if(!wifiConnected) return;
   if(mqtt.connected()) return;
-  DBG_INFO("[MQTT] connecting...\n");
-  while(!mqtt.connected()){
-    mqtt.connect("osmose");
-    delay(500);
+
+  static uint32_t lastTry = 0;
+
+  if(millis() - lastTry < 5000) return;   // only every 5s
+  lastTry = millis();
+
+  DBG_INFO("[MQTT] try connect...");
+
+  if(mqtt.connect("osmose")){
+    DBG_INFO("[MQTT] connected");
+  }else{
+    DBG_ERR("[MQTT] failed rc=%d", mqtt.state());
   }
-  DBG_INFO("[MQTT] connected\n");
 }
+
 
 void mqttPublish(const char* s,float tds,float prod){
   if(!mqtt.connected()) return;
@@ -407,8 +406,7 @@ void loop(){
     switch(state){
 
       case IDLE:
-        if(!webHold)          // <<< ADD
-          setState(PREPARE);
+        setState(PREPARE);
         break;
 
       case PREPARE:
@@ -460,27 +458,6 @@ void loop(){
   }
 
   updateLEDs(state);
-  
-  // ===== ADD: Web Start/Stop handling =====
-  if(webStartRequest){
-    webStartRequest=false;
-    DBG_INFO("[WEB] START\n");
-    webHold=false;
-    setState(PREPARE);
-  }
-
-  if(webStopRequest){
-    webStopRequest=false;
-    DBG_INFO("[WEB] STOP\n");
-    webStopRequest=false;
-    webHold=true;      // <<< ADD
-    allOff();
-    setState(IDLE);
-  }
-
-
-  // =======================================
-
   webLoop(tds, sName[state], liters(cntOut-prodStartCnt));
 
 
