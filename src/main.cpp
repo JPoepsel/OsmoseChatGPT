@@ -25,6 +25,8 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include "web.h"
+#include "config_settings.h"
+
 
 // ================= DEBUG =================
 #if DEBUG_LEVEL>=1
@@ -94,6 +96,7 @@ const int  DST_OFFSET=3600;
 #define PULSES_PER_LITER_IN   100
 #define PULSES_PER_LITER_OUT  100
 
+static bool lastSwitchState = false;
 
 // ============================================================
 // Helpers
@@ -357,6 +360,8 @@ void setup(){
 
   startWifi();
   webInit();
+  configLoad();
+
 }
 
 
@@ -370,6 +375,19 @@ void loop(){
 
   int raw=analogRead(PIN_TDS_ADC);
   float tds=rawToTds(raw);
+  /* =========================================
+     Web Start/Stop Requests
+  ========================================= */
+
+  if(webStartRequest){
+    webStartRequest=false;
+    setState(IDLE);        // oder dein gewünschter Start-State
+  }
+
+  if(webStopRequest){
+    webStopRequest=false;
+    setState(ERROR);       // oder allOff()/Idle
+  }
 
   historyAdd(tds);
   lastAdd(raw,tds);
@@ -429,15 +447,36 @@ void loop(){
           enterError("Flush timeout");
         break;
 
-      case PRODUCTION:
+      case PRODUCTION: {
         setOut(OOut,true);
 
         if(tds>TDS_MAX_ALLOWED)
           enterError("TDS too high");
 
-        if(liters(cntOut-prodStartCnt)>MAX_LITERS)
+
+        /* -------------------------------------------------------
+           NEW: production counter for settings-based limit
+        ------------------------------------------------------- */
+        float produced = liters(cntOut - prodStartCnt);
+        prodAdd(produced - producedLiters);
+        bool isManualMode = inActive(PIN_SMANU);
+        bool lowSwitch    = inActive(PIN_WLOW);
+        if(prodCheckLimit(isManualMode)){
+          setState(IDLE);
+          break;
+        }
+        bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
+        bool switchOffToOn = (!lastSwitchState && switchNow);
+        lastSwitchState = switchNow;
+
+        prodHandleResets(lowSwitch, switchOffToOn);
+        /* -------------------------------------------------------
+           bestehender alter Hardlimit (kannst du später entfernen)
+        ------------------------------------------------------- */
+        if(produced > MAX_LITERS)
           enterError("Volume limit");
         break;
+      }
 
       case ERROR:
         allOff();

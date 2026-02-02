@@ -4,6 +4,8 @@
 #include <AsyncTCP.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include "config_settings.h"
+
 
 bool webStartRequest=false;
 bool webStopRequest=false;
@@ -15,9 +17,21 @@ static uint32_t lastSend=0;
 
 #define WEBDBG(...) Serial.printf(__VA_ARGS__)
 
-// ============================================================
-// Broadcast full status
-// ============================================================
+
+/* ============================================================
+   HELPER – disable browser cache
+   ============================================================ */
+static void addNoCache(AsyncWebServerResponse *r)
+{
+  r->addHeader("Cache-Control","no-cache, no-store, must-revalidate");
+  r->addHeader("Pragma","no-cache");
+  r->addHeader("Expires","0");
+}
+
+
+/* ============================================================
+   Broadcast full status (WebSocket)
+   ============================================================ */
 static void wsBroadcast(float tds,
                         const char* stateName,
                         float litersNow,
@@ -38,7 +52,8 @@ static void wsBroadcast(float tds,
   ws.textAll(s);
 }
 
-// ============================================================
+
+/* ============================================================ */
 static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
                       AwsEventType type, void*, uint8_t* data, size_t len)
 {
@@ -50,7 +65,10 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
   if(m=="stop")  webStopRequest=true;
 }
 
-// ============================================================
+
+/* ============================================================
+   INIT
+   ============================================================ */
 void webInit()
 {
   WEBDBG("[WEB] SPIFFS init\n");
@@ -60,14 +78,80 @@ void webInit()
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
-  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+
+  /* =========================
+     STATIC FILES (NO CACHE)
+  ========================= */
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    auto r=request->beginResponse(SPIFFS,"/index.html","text/html");
+    addNoCache(r);
+    request->send(r);
+  });
+
+  server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
+    auto r=request->beginResponse(SPIFFS,"/app.js","application/javascript");
+    addNoCache(r);
+    request->send(r);
+  });
+
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    auto r=request->beginResponse(SPIFFS,"/style.css","text/css");
+    addNoCache(r);
+    request->send(r);
+  });
+
+
+  /* =========================
+     SETTINGS GET
+  ========================= */
+  server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *request){
+
+    WEBDBG("[WEB] settings GET\n");
+
+    String json;
+ 
+    if(configDoc.isNull())
+      json = "{}";
+    else
+      serializeJson(configDoc,json);
+
+    auto r=request->beginResponse(200,"application/json",json);
+    addNoCache(r);
+    request->send(r);
+  });
+
+
+  /* =========================
+     SETTINGS POST
+  ========================= */
+  server.on("/api/settings", HTTP_POST,
+    [](AsyncWebServerRequest *request){},
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t){
+
+      WEBDBG("[WEB] settings POST\n");
+
+      JsonDocument doc;
+      deserializeJson(doc, data);
+
+      configDoc.clear();
+      configDoc.set(doc);
+
+      configSave();
+
+      request->send(200,"text/plain","OK");
+    });
+
 
   server.begin();
 
   WEBDBG("[WEB] server ready\n");
 }
 
-// ============================================================
+
+/* ============================================================
+   LOOP  (BLEIBT – dein Live-Status!)
+   ============================================================ */
 void webLoop(float tds, const char* stateName, float litersNow)
 {
   static uint32_t lastCnt=0;
@@ -81,7 +165,7 @@ void webLoop(float tds, const char* stateName, float litersNow)
     lastT=millis();
   }
 
-  float left = 50.0 - litersNow; // MAX_LITERS später parametrieren
+  float left = 50.0 - litersNow; // später CFG("maxProductionLiters")
 
   if(millis()-lastSend>300){
     wsBroadcast(tds,stateName,litersNow,flow,left);

@@ -6,7 +6,7 @@
 
 <title>Osmose Controller</title>
 
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
@@ -50,35 +50,33 @@
 
 
 <!-- ========================================================= -->
-<!-- SETTINGS  (NEU – komplett) -->
+<!-- SETTINGS -->
 <!-- ========================================================= -->
 <section id="set" hidden>
 
 <h3>⚙ Settings</h3>
 
-<div class="settings">
+<div id="settings">
 
-  <label>
-    Pulses / Liter IN
-    <input id="set_pin" type="number" value="100">
-  </label>
+  <h3>Flow Calibration</h3>
+  <label>Pulses/Liter IN <input id="pulsesPerLiterIn" type="number" step="0.1"></label>
+  <label>Pulses/Liter OUT <input id="pulsesPerLiterOut" type="number" step="0.1"></label>
 
-  <label>
-    Pulses / Liter OUT
-    <input id="set_pout" type="number" value="100">
-  </label>
+  <h3>Process</h3>
+  <label>TDS Limit <input id="tdsLimit" type="number"></label>
+  <label>Flush Time (s) <input id="flushTimeSec" type="number"></label>
+  <label>Max Runtime (s) <input id="maxRuntimeSec" type="number"></label>
+  <label>Max Production (L) <input id="maxProductionLiters" type="number" step="0.1"></label>
 
-  <label>
-    Prepare Time (ms)
-    <input id="set_prepare" type="number" value="10000">
-  </label>
+  <h3>System</h3>
+  <label><input id="autoStart" type="checkbox"> Auto Start</label>
+  <label>MQTT Host <input id="mqttHost"></label>
+  <label>MQTT Port <input id="mqttPort" type="number"></label>
+  <label>mDNS Name <input id="mDNSName"></label>
+  <label>AP Password <input id="APPassWord" type="password"></label>
 
-  <label>
-    Flush Timeout (ms)
-    <input id="set_flush" type="number" value="120000">
-  </label>
-
-  <button class="save" onclick="saveSettings()">💾 Save</button>
+  <br><br>
+  <button onclick="saveSettings()">Save Settings</button>
 
 </div>
 
@@ -87,26 +85,9 @@
 
 
 <!-- ========================================================= -->
-<script src="app.js"></script>
-
-<script>
-function saveSettings(){
-
-  const payload = {
-    cmd: "save",
-
-    pin:     Number(set_pin.value),
-    pout:    Number(set_pout.value),
-    prepare: Number(set_prepare.value),
-    flush:   Number(set_flush.value)
-  };
-
-  ws.send(JSON.stringify(payload));
-
-  alert("Settings gesendet");
-}
-</script>
-
+<!-- IMPORTANT: only ONE script, no inline JS -->
+<!-- ========================================================= -->
+<script src="app.js?v=2"></script>
 
 </body>
 </html>

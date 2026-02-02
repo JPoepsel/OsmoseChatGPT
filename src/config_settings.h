@@ -4,8 +4,7 @@
 #include <ArduinoJson.h>
 
 /* ============================================================
-   GLOBAL CONFIG (JSON)
-   ArduinoJson v7 style (JsonDocument, not deprecated Dynamic*)
+   GLOBAL CONFIG (ArduinoJson v7)
    ============================================================ */
 
 extern JsonDocument configDoc;
@@ -13,10 +12,7 @@ extern JsonDocument configDoc;
 bool configLoad();
 bool configSave();
 
-/* fallback helper
-   usage:
-   float v = CFG("tdsLimit", 500);
-*/
+/* helper with default */
 #define CFG(key, def) (configDoc[key] | (def))
 
 
@@ -26,14 +22,9 @@ bool configSave();
 
 extern float producedLiters;
 
-/* add produced liters each cycle */
 void prodAdd(float deltaLiters);
 
-/* check against maxProductionLiters */
-void prodCheckLimit(bool isManualMode);
+/* returns true -> limit reached */
+bool prodCheckLimit(bool isManualMode);
 
-/* handle reset logic
-   lowSwitch        = current LOW float state
-   switchOffToOn    = manual/auto switch rising edge
-*/
 void prodHandleResets(bool lowSwitch, bool switchOffToOn);
