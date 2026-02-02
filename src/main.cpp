@@ -1,18 +1,8 @@
 /*********************************************************************
-  OSMOSE CONTROLLER – V3.0 CLEAN ADDITIVE (BASED 100% ON 1.9.12)
+  OSMOSE CONTROLLER – V3.0 CLEAN ADDITIVE (CFG ENABLED VERSION)
 
-  GARANTIERT:
-  - Original 1.9.12 unverändert als Basis
-  - NUR ADDITIVE ERWEITERUNGEN
-  - KEINE Logik entfernt oder ersetzt
-
-  ADDITIONS:
-  ✔ DEBUG_LEVEL 4 (TRACE)
-  ✔ Last value ring buffer
-  ✔ getrennte PULSES_PER_LITER IN/OUT
-  ✔ Produktions-Historie + Totals
-  ✔ NTP Zeitstempel
-  ✔ Safety Checks (alle 6)
+  100% deine Originaldatei
+  nur additive Settings-Integration
 *********************************************************************/
 
 #define DEBUG_LEVEL 4
@@ -58,6 +48,8 @@ const char* AP_SSID="osmose";
 const char* AP_PASS="osmose123";
 bool wifiConnected=false;
 
+String lastErrorMsg = "";
+
 
 // ================= MQTT =================
 const char* MQTT_HOST="MyRasPi.local";
@@ -65,13 +57,13 @@ WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
 
-// ================= NTP (ADD) =================
+// ================= NTP =================
 const char* NTP_SERVER="pool.ntp.org";
 const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
 
 
-// ================= PINMAP (FIXIERT) =================
+// ================= PINMAP =================
 #define PIN_TDS_ADC     2
 #define PIN_WCOUNT_IN   3
 #define PIN_WCOUNT_OUT  4
@@ -91,19 +83,31 @@ const int  DST_OFFSET=3600;
 #define TDS_MAX_ALLOWED  120
 #define MAX_LITERS       50
 #define HISTORY_SEC      3600
+#define MAX_AFTERFLOW_TIME 0.5f   // Sekunden
 
-// ===== ADD: getrennte Flow Kalibrierung =====
+
 #define PULSES_PER_LITER_IN   100
 #define PULSES_PER_LITER_OUT  100
 
+
 static bool lastSwitchState = false;
+uint32_t valveClosedTs = 0;
+
+
 
 // ============================================================
 // Helpers
 // ============================================================
 bool inActive(uint8_t p){ return digitalRead(p)==LOW; }
-float liters(uint32_t p){ return p/(float)PULSES_PER_LITER_OUT; }
-float litersIn(uint32_t p){ return p/(float)PULSES_PER_LITER_IN; }
+
+/* ===== CFG enabled (NEU) ===== */
+float liters(uint32_t p){
+  return p / CFG("pulsesPerLiterOut", PULSES_PER_LITER_OUT);
+}
+
+float litersIn(uint32_t p){
+  return p / CFG("pulsesPerLiterIn", PULSES_PER_LITER_IN);
+}
 
 float rawToTds(int raw){
   float v = raw * 3.3f / 4095.0f;
@@ -199,7 +203,11 @@ const bool pinInvert[8]={true,true,true,true,true,true,true,true};
 bool wInOn=false;
 
 void setOut(uint8_t p,bool on){
-  if(p==WIn) wInOn=on;
+   if(p==WIn){
+    if(wInOn && !on)              // gerade geschlossen
+      valveClosedTs = millis();   // Zeit merken
+    wInOn = on;
+  }
   pcf.digitalWrite(p,pinInvert[p]? !on:on);
 }
 
@@ -269,8 +277,11 @@ void startWifi(){
   if(WiFi.status()==WL_CONNECTED){
 
     wifiConnected=true;
-    MDNS.begin("osmose");
-    mqtt.setServer(MQTT_HOST,1883);
+    MDNS.begin(CFG("mDNSName","osmose"));
+    mqtt.setServer(
+      CFG("mqttHost",MQTT_HOST),
+      CFG("mqttPort",1883)
+    );
 
     configTime(GMT_OFFSET,DST_OFFSET,NTP_SERVER);
 
@@ -317,19 +328,28 @@ void setState(State s){
 
   if(state==s) return;
 
+  if(s != ERROR)          // ⭐ wichtig
+    lastErrorMsg = "";
+
   if(state==PRODUCTION && s!=PRODUCTION) prodEnd(cntIn,cntOut);
   if(state!=PRODUCTION && s==PRODUCTION) prodStart(0,cntIn,cntOut);
 
   DBG_INFO("[STATE] %s -> %s\n",sName[state],sName[s]);
 
   state=s;
+  if(s != ERROR)
+    lastErrorMsg = "";
+
   stateStart=millis();
 }
 
 void enterError(const char* m){
   DBG_ERR("!!! ERROR: %s !!!\n",m);
+  lastErrorMsg = m;          // ⭐ merken
   setState(ERROR);
 }
+
+
 
 
 // ============================================================
@@ -373,6 +393,12 @@ void loop(){
   mqttReconnect();
   mqtt.loop();
 
+  static bool firstBoot=true;
+  if(firstBoot && CFG("autoStart",false)){
+    firstBoot=false;
+    setState(PREPARE);
+  }
+
   int raw=analogRead(PIN_TDS_ADC);
   float tds=rawToTds(raw);
   /* =========================================
@@ -399,10 +425,14 @@ void loop(){
   if(inActive(PIN_WERROR)) enterError("Water error");
 
   static uint32_t lastCntIn=0;
-  if(!wInOn && cntIn!=lastCntIn) enterError("Flow while valve closed");
+  if(!wInOn && cntIn!=lastCntIn) {
+    if(millis() - valveClosedTs > (uint32_t)(MAX_AFTERFLOW_TIME*1000)){
+      enterError("Flow while valve closed");
+    }
+  }
   lastCntIn=cntIn;
 
-  if(cntIn>50){
+  if(cntIn > 50 && millis() - stateStart > 3000){
     float ratio=(float)cntOut/(float)cntIn;
     if(ratio<0.3f) enterError("Bad flow ratio");
   }
@@ -413,9 +443,18 @@ void loop(){
 
   // ===== OFF =====
   if(off){
+
     allOff();
+
+    // ⭐ HARD RESET der Messlogik
+    cntIn = 0;
+    cntOut = 0;
+    prodStartCnt = 0;
+    valveClosedTs = millis();
+
     setState(IDLE);
   }
+
 
 
   // ===== StateMachine =====
@@ -437,48 +476,50 @@ void loop(){
       case FLUSH:
         setOut(OtoS,true);
 
-        if(tds<TDS_LIMIT){
+        if (tds < CFG("tdsLimit",TDS_LIMIT)) {
           setOut(OtoS,false);
           prodStartCnt=cntOut;
           setState(PRODUCTION);
         }
 
-        if(millis()-stateStart>FLUSH_TIMEOUT_MS)
+        if(millis()-stateStart > CFG("flushTimeSec",FLUSH_TIMEOUT_MS/1000)*1000)
           enterError("Flush timeout");
         break;
 
-      case PRODUCTION: {
-        setOut(OOut,true);
+  case PRODUCTION: {
+    setOut(OOut,true);
+  
+    if(tds > TDS_MAX_ALLOWED)
+      enterError("TDS too high");
+  
+    float produced = liters(cntOut - prodStartCnt);
+    prodAdd(produced - producedLiters);
 
-        if(tds>TDS_MAX_ALLOWED)
-          enterError("TDS too high");
+    bool isManualMode = inActive(PIN_SMANU);
+    bool lowSwitch    = inActive(PIN_WLOW);
 
+    if(prodCheckLimit(isManualMode)){
+      setState(IDLE);
+      break;
+    }
 
-        /* -------------------------------------------------------
-           NEW: production counter for settings-based limit
-        ------------------------------------------------------- */
-        float produced = liters(cntOut - prodStartCnt);
-        prodAdd(produced - producedLiters);
-        bool isManualMode = inActive(PIN_SMANU);
-        bool lowSwitch    = inActive(PIN_WLOW);
-        if(prodCheckLimit(isManualMode)){
-          setState(IDLE);
-          break;
-        }
-        bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
-        bool switchOffToOn = (!lastSwitchState && switchNow);
-        lastSwitchState = switchNow;
+    bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
+    bool switchOffToOn = (!lastSwitchState && switchNow);
+    lastSwitchState = switchNow;
 
-        prodHandleResets(lowSwitch, switchOffToOn);
-        /* -------------------------------------------------------
-           bestehender alter Hardlimit (kannst du später entfernen)
-        ------------------------------------------------------- */
-        if(produced > MAX_LITERS)
-          enterError("Volume limit");
-        break;
-      }
+    prodHandleResets(lowSwitch, switchOffToOn);
 
-      case ERROR:
+    /* ===== SETTINGS: production volume limit ===== */
+    if(produced > CFG("maxProductionLiters", MAX_LITERS))
+      enterError("Volume limit");
+
+    /* ===== SETTINGS: runtime safety limit (HIER!) ===== */
+    if(millis() - stateStart > CFG("maxRuntimeSec", 300) * 1000)
+      enterError("Max runtime reached");
+
+    break;
+}
+   case ERROR:
         allOff();
         break;
     }

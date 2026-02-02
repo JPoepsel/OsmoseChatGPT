@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include "config_settings.h"
 
+extern String lastErrorMsg;
 
 bool webStartRequest=false;
 bool webStopRequest=false;
@@ -41,6 +42,7 @@ static void wsBroadcast(float tds,
   JsonDocument doc;
 
   doc["state"]=stateName;
+  doc["error"]=lastErrorMsg;
   doc["tds"]=tds;
   doc["liters"]=litersNow;
   doc["flow"]=flowLpm;

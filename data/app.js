@@ -40,7 +40,10 @@ function connectWS()
 
     const d = JSON.parse(ev.data);
 
-    if(d.state !== undefined)  state.innerText  = d.state;
+    if(d.state !== undefined)
+      state.innerText = d.error ? (d.state + " : " + d.error) : d.state;
+
+
     if(d.tds !== undefined)    tds.innerText    = Number(d.tds).toFixed(1);
     if(d.liters !== undefined) liters.innerText = Number(d.liters).toFixed(2);
     if(d.flow !== undefined)   flow.innerText   = Number(d.flow).toFixed(2);
