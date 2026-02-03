@@ -28,3 +28,5 @@ void prodAdd(float deltaLiters);
 bool prodCheckLimit(bool isManualMode);
 
 void prodHandleResets(bool lowSwitch, bool switchOffToOn);
+
+bool configEnsureExists();   // create default config if missing

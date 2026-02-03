@@ -181,5 +181,39 @@ canvas{
   font-size:16px;
 }
 
+/* ===== Settings Layout ===== */
 
-/* =========================================================
+#settings {
+  max-width: 520px;      /* <<< begrenzt Breite auf Desktop */
+  margin: 0 auto;       /* zentriert */
+  padding: 10px 16px;   /* Innenabstand links/rechts */
+}
+
+#settings label {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 12px;
+
+  margin-bottom: 12px;
+}
+
+#settings input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;     /* fühlt sich wertiger an */
+}
+
+/* Checkbox sauber links */
+#settings input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+
+button:disabled{
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+

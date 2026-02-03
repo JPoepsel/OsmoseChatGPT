@@ -105,3 +105,47 @@ void prodHandleResets(bool lowSwitch, bool switchOffToOn)
 
   lastLowSwitch = lowSwitch;
 }
+
+/* ============================================================
+   DEFAULT CONFIG CREATION (ADD ONLY)
+   ============================================================ */
+
+static void configWriteDefaults()
+{
+  Serial.println("[CFG] creating default config.json");
+
+  configDoc.clear();
+
+  // ===== Flow calibration
+  configDoc["pulsesPerLiterIn"]    = 100;
+  configDoc["pulsesPerLiterOut"]   = 100;
+
+  // ===== Process
+  configDoc["tdsLimit"]            = 50;
+  configDoc["flushTimeSec"]        = 120;
+  configDoc["maxRuntimeSec"]       = 300;
+  configDoc["maxProductionLiters"] = 50.0;
+
+  // ===== System
+  configDoc["autoStart"]           = false;
+  configDoc["mqttHost"]            = "192.168.68.57";
+  configDoc["mqttPort"]            = 1883;
+  configDoc["mDNSName"]            = "osmose";
+
+  configSave();
+}
+
+
+bool configEnsureExists()
+{
+  if(!SPIFFS.begin(true)){
+    Serial.println("[CFG] SPIFFS mount failed");
+    return false;
+  }
+
+  if(!SPIFFS.exists("/config.json")){
+    configWriteDefaults();
+  }
+
+  return true;
+}

@@ -90,7 +90,7 @@ const int  DST_OFFSET=3600;
 #define PULSES_PER_LITER_OUT  100
 
 
-static bool lastSwitchState = false;
+static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
 
 
@@ -215,6 +215,7 @@ void allOff(){
   DBG_INFO("[OUT] ALL OFF\n");
   for(int i=0;i<8;i++) setOut(i,false);
 }
+
 
 
 // ============================================================
@@ -349,6 +350,20 @@ void enterError(const char* m){
   setState(ERROR);
 }
 
+void hardResetToIdle()
+{
+  allOff();
+
+  cntIn = 0;
+  cntOut = 0;
+  prodStartCnt = 0;
+  valveClosedTs = millis();
+
+  producedLiters = 0;   // wichtig für Limit-System
+
+  setState(IDLE);
+}
+
 
 
 
@@ -380,6 +395,7 @@ void setup(){
 
   startWifi();
   webInit();
+  configEnsureExists();
   configLoad();
 
 }
@@ -405,15 +421,28 @@ void loop(){
      Web Start/Stop Requests
   ========================================= */
 
+  // ===== Web Start =====
   if(webStartRequest){
     webStartRequest=false;
-    setState(IDLE);        // oder dein gewünschter Start-State
+    setState(PREPARE);
   }
 
+  // ===== Web Stop =====
   if(webStopRequest){
     webStopRequest=false;
-    setState(ERROR);       // oder allOff()/Idle
+    hardResetToIdle();
   }
+
+  // ===== Manual switch start (0 -> MANU rising edge) =====
+  bool manualNow = inActive(PIN_SMANU);
+
+  if(state == IDLE && manualNow && !lastSwitchState){
+    DBG_INFO("[START] manual switch\n");
+    setState(PREPARE);
+  }
+
+  lastSwitchState = manualNow;
+
 
   historyAdd(tds);
   lastAdd(raw,tds);
@@ -463,8 +492,8 @@ void loop(){
     switch(state){
 
       case IDLE:
-        setState(PREPARE);
-        break;
+        // warten auf Start (Web / Manual / AutoStart)
+      break;
 
       case PREPARE:
         setOut(Relay,true);

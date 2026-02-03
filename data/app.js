@@ -40,8 +40,10 @@ function connectWS()
 
     const d = JSON.parse(ev.data);
 
-    if(d.state !== undefined)
+    if(d.state !== undefined) {
       state.innerText = d.error ? (d.state + " : " + d.error) : d.state;
+      updateButtons(d.state);   // <<< ADD
+    }
 
 
     if(d.tds !== undefined)    tds.innerText    = Number(d.tds).toFixed(1);
@@ -68,6 +70,26 @@ function stopCmd()
     ws.send("stop");
 }
 
+/* ============================================================
+   BUTTON STATE CONTROL (ADD)
+   ============================================================ */
+
+function updateButtons(stateName)
+{
+  const start = document.getElementById("btnStart");
+  const stop  = document.getElementById("btnStop");
+
+  if(!start || !stop) return;
+
+  if(stateName === "IDLE" || stateName === "ERROR"){
+    start.disabled = false;
+    stop.disabled  = true;
+  }
+  else{
+    start.disabled = true;
+    stop.disabled  = false;
+  }
+}
 
 /* ============================================================
    SETTINGS SAVE
@@ -163,3 +185,4 @@ window.onload = () =>
   connectWS();
   loadSettings();
 };
+
