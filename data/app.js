@@ -16,6 +16,9 @@ function show(id)
 
   const el = document.getElementById(id);
   if(el) el.hidden = false;
+
+  if(id === "hist" && !chart)
+    initHistory();
 }
 
 
@@ -186,3 +189,100 @@ window.onload = () =>
   loadSettings();
 };
 
+
+/* ============================================================
+   HISTORY PAGE
+   ============================================================ */
+
+let chart;
+let histTimer;
+
+function initHistory()
+{
+  const ctx = document.getElementById("chart");
+
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "TDS",  data: [], yAxisID: "y1" },
+        { label: "Flow", data: [], yAxisID: "y2" },
+        { label: "Liter",data: [], yAxisID: "y2" }
+      ]
+    },
+    options: {
+      animation:false,
+      responsive:true,
+      scales:{
+        y1:{ type:"linear", position:"left" },
+        y2:{ type:"linear", position:"right" }
+      }
+    }
+  });
+
+  loadHistory();
+
+  histTimer = setInterval(loadHistory, 30000);
+
+  document.getElementById("rangeSel").onchange = loadHistory;
+}
+
+
+/* ================== SERIES ================== */
+
+function loadHistory()
+{
+  const sec = document.getElementById("rangeSel").value;
+
+  fetch("/api/history/series?range="+sec)
+    .then(r => r.json())
+    .then(d => {
+
+      const len = d.tds.length;
+
+      chart.data.labels = Array(len).fill("");
+
+      chart.data.datasets[0].data = d.tds;
+      chart.data.datasets[1].data = d.flow;
+      chart.data.datasets[2].data = d.prod;
+
+      chart.update();
+
+      const last = len-1;
+
+      document.getElementById("lastValues").innerText =
+        `TDS: ${d.tds[last]?.toFixed(1)}  |  Flow: ${d.flow[last]?.toFixed(2)}  |  Liter: ${d.prod[last]?.toFixed(2)}`;
+
+      loadHistoryTable();
+    });
+}
+
+
+/* ================== TABLE ================== */
+
+function loadHistoryTable()
+{
+  fetch("/api/history/table")
+    .then(r => r.json())
+    .then(rows => {
+
+      const body = document.querySelector("#histTable tbody");
+      body.innerHTML = "";
+
+      rows.forEach(r => {
+
+        const tr = document.createElement("tr");
+
+        const fmt = t => t ? new Date(t*1000).toLocaleString() : "";
+
+        tr.innerHTML =
+          `<td>${fmt(r.start)}</td>
+           <td>${fmt(r.end)}</td>
+           <td>${Number(r.liters).toFixed(2)}</td>
+           <td>${r.reason||""}</td>`;
+
+        body.appendChild(tr);
+      });
+    });
+}

@@ -44,7 +44,33 @@
 <!-- HISTORY -->
 <!-- ========================================================= -->
 <section id="hist" hidden>
-  <canvas id="chart"></canvas>
+
+<h3>📈 History</h3>
+
+<select id="rangeSel">
+  <option value="300">5 min</option>
+  <option value="3600" selected>1 h</option>
+  <option value="86400">24 h</option>
+</select>
+
+<canvas id="chart" height="140"></canvas>
+
+<div id="lastValues" style="margin-top:10px;font-size:14px;"></div>
+
+<h3 style="margin-top:20px;">Bezüge</h3>
+
+<table id="histTable" border="1" cellspacing="0" cellpadding="4">
+  <thead>
+    <tr>
+      <th>Start</th>
+      <th>Stop</th>
+      <th>Liter</th>
+      <th>Grund</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
 </section>
 
 

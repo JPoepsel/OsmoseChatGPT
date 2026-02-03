@@ -122,7 +122,7 @@ static void configWriteDefaults()
 
   // ===== Process
   configDoc["tdsLimit"]            = 50;
-  configDoc["flushTimeSec"]        = 120;
+  configDoc["flushTimeSec"]        = 12;
   configDoc["maxRuntimeSec"]       = 300;
   configDoc["maxProductionLiters"] = 50.0;
 
@@ -138,11 +138,7 @@ static void configWriteDefaults()
 
 bool configEnsureExists()
 {
-  if(!SPIFFS.begin(true)){
-    Serial.println("[CFG] SPIFFS mount failed");
-    return false;
-  }
-
+  
   if(!SPIFFS.exists("/config.json")){
     configWriteDefaults();
   }

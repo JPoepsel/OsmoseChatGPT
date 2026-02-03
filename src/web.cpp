@@ -5,6 +5,8 @@
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include "config_settings.h"
+#include "history.h"
+
 
 extern String lastErrorMsg;
 
@@ -73,10 +75,6 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
    ============================================================ */
 void webInit()
 {
-  WEBDBG("[WEB] SPIFFS init\n");
-
-  SPIFFS.begin(true);
-
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
@@ -144,11 +142,26 @@ void webInit()
       request->send(200,"text/plain","OK");
     });
 
+  server.on("/api/history/series", HTTP_GET, [](AsyncWebServerRequest *req){
+    uint32_t range = 3600;
+
+    if(req->hasParam("range"))
+      range = req->getParam("range")->value().toInt();
+
+    req->send(200, "application/json", historyGetSeriesJson(range));
+  });
+
+  server.on("/api/history/table", HTTP_GET, [](AsyncWebServerRequest *req){
+    Serial.printf("TABLE REQUEST rowCount=%d\n", historyGetRowCount());
+    req->send(200, "application/json", historyGetTableJson());
+  });
+
 
   server.begin();
 
   WEBDBG("[WEB] server ready\n");
 }
+
 
 
 /* ============================================================

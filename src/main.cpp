@@ -5,7 +5,7 @@
   nur additive Settings-Integration
 *********************************************************************/
 
-#define DEBUG_LEVEL 4
+#define DEBUG_LEVEL 0
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -14,8 +14,10 @@
 #include <Adafruit_PCF8574.h>
 #include <PubSubClient.h>
 #include <time.h>
+#include <SPIFFS.h>
 #include "web.h"
 #include "config_settings.h"
+#include "history.h"
 
 
 // ================= DEBUG =================
@@ -78,7 +80,7 @@ const int  DST_OFFSET=3600;
 
 // ================= PARAMETER =================
 #define PREPARE_TIME_MS  10000
-#define FLUSH_TIMEOUT_MS 120000
+#define FLUSH_TIMEOUT_MS 12000
 #define TDS_LIMIT        50
 #define TDS_MAX_ALLOWED  120
 #define MAX_LITERS       50
@@ -115,15 +117,6 @@ float rawToTds(int raw){
 }
 
 
-// ============================================================
-// Historie (ORIGINAL)
-// ============================================================
-float histTds[HISTORY_SEC];
-uint16_t histIdx=0;
-void historyAdd(float t){
-  histTds[histIdx]=t;
-  histIdx=(histIdx+1)%HISTORY_SEC;
-}
 
 
 // ============================================================
@@ -325,24 +318,48 @@ State state=IDLE,lastState=IDLE;
 uint32_t stateStart=0;
 uint32_t prodStartCnt=0;
 
-void setState(State s){
+void setState(State s)
+{
+  if(state == s) return;
 
-  if(state==s) return;
+  DBG_INFO("[STATE] %s -> %s\n", sName[state], sName[s]);
 
-  if(s != ERROR)          // ⭐ wichtig
-    lastErrorMsg = "";
+  /* ========= START Produktion ========= */
+  if(state == FLUSH && s == PRODUCTION)
+  {
+    prodStart(0, cntIn, cntOut);
+    historyStartProduction();
+  }
 
-  if(state==PRODUCTION && s!=PRODUCTION) prodEnd(cntIn,cntOut);
-  if(state!=PRODUCTION && s==PRODUCTION) prodStart(0,cntIn,cntOut);
+  /* ========= ENDE Produktion ========= */
+  if(prodActive)   // ⭐⭐⭐ ENTSCHEIDEND! ⭐⭐⭐
+  {
+    if(s != PRODUCTION)
+    {
+      char reasonBuf[20];
 
-  DBG_INFO("[STATE] %s -> %s\n",sName[state],sName[s]);
+      if(lastErrorMsg.length())
+        strncpy(reasonBuf, lastErrorMsg.c_str(), sizeof(reasonBuf)-1);
+      else
+        strcpy(reasonBuf, "Stopped");
 
-  state=s;
+      reasonBuf[sizeof(reasonBuf)-1] = 0;
+
+      prodEnd(cntIn, cntOut);
+      historyEndProduction(reasonBuf);
+      Serial.printf("ReasonBuf=%s",reasonBuf);
+    }
+  }
+
+  state = s;
+  stateStart = millis();
+
   if(s != ERROR)
     lastErrorMsg = "";
-
-  stateStart=millis();
 }
+
+
+
 
 void enterError(const char* m){
   DBG_ERR("!!! ERROR: %s !!!\n",m);
@@ -359,9 +376,9 @@ void hardResetToIdle()
   prodStartCnt = 0;
   valveClosedTs = millis();
 
-  producedLiters = 0;   // wichtig für Limit-System
+  producedLiters = 0;
 
-  setState(IDLE);
+  setState(IDLE);   // ✅ nur das!
 }
 
 
@@ -374,6 +391,10 @@ void setup(){
 
   Serial.begin(115200);
   delay(800);
+
+  SPIFFS.begin(true);   // <<< nur hier!
+  historyInit();
+
 
   DBG_INFO("BOOT 3.0\n");
 
@@ -444,9 +465,10 @@ void loop(){
   lastSwitchState = manualNow;
 
 
-  historyAdd(tds);
   lastAdd(raw,tds);
   prodUpdate(tds,cntIn,cntOut);
+
+  historyAddSample(tds, liters(cntIn), liters(cntOut-prodStartCnt));
 
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
 
