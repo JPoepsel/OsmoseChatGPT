@@ -4,9 +4,10 @@
 #include <AsyncTCP.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
-#include "config_settings.h"
-#include "history.h"
 
+#include "history.h"
+#include "config_settings.h"
+#include "settings.h"
 
 extern String lastErrorMsg;
 
@@ -18,12 +19,19 @@ AsyncWebSocket ws("/ws");
 
 static uint32_t lastSend=0;
 
-#define WEBDBG(...) Serial.printf(__VA_ARGS__)
-
 
 /* ============================================================
-   HELPER – disable browser cache
+   ⭐ HISTORY CALLBACK (NEU)
+   Wird von history.cpp gerufen wenn Tabelle sich ändert
    ============================================================ */
+
+static void onHistoryUpdate()
+{
+  ws.textAll("{\"histUpdate\":1}");
+}
+
+
+/* ============================================================ */
 static void addNoCache(AsyncWebServerResponse *r)
 {
   r->addHeader("Cache-Control","no-cache, no-store, must-revalidate");
@@ -32,9 +40,7 @@ static void addNoCache(AsyncWebServerResponse *r)
 }
 
 
-/* ============================================================
-   Broadcast full status (WebSocket)
-   ============================================================ */
+/* ============================================================ */
 static void wsBroadcast(float tds,
                         const char* stateName,
                         float litersNow,
@@ -70,18 +76,15 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
 }
 
 
-/* ============================================================
-   INIT
-   ============================================================ */
+/* ============================================================ */
 void webInit()
 {
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
+  /* ⭐⭐⭐ HIER REGISTRIEREN ⭐⭐⭐ */
+  historySetUpdateCallback(onHistoryUpdate);
 
-  /* =========================
-     STATIC FILES (NO CACHE)
-  ========================= */
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     auto r=request->beginResponse(SPIFFS,"/index.html","text/html");
     addNoCache(r);
@@ -101,19 +104,11 @@ void webInit()
   });
 
 
-  /* =========================
-     SETTINGS GET
-  ========================= */
+  /* SETTINGS GET */
   server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *request){
 
-    WEBDBG("[WEB] settings GET\n");
-
     String json;
- 
-    if(configDoc.isNull())
-      json = "{}";
-    else
-      serializeJson(configDoc,json);
+    serializeJson(configDoc,json);
 
     auto r=request->beginResponse(200,"application/json",json);
     addNoCache(r);
@@ -121,30 +116,27 @@ void webInit()
   });
 
 
-  /* =========================
-     SETTINGS POST
-  ========================= */
+  /* SETTINGS POST */
   server.on("/api/settings", HTTP_POST,
     [](AsyncWebServerRequest *request){},
     NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t){
-
-      WEBDBG("[WEB] settings POST\n");
 
       JsonDocument doc;
       deserializeJson(doc, data);
 
       configDoc.clear();
       configDoc.set(doc);
-
       configSave();
+
+      settingsLoad();
 
       request->send(200,"text/plain","OK");
     });
 
+
   server.on("/api/history/series", HTTP_GET, [](AsyncWebServerRequest *req){
     uint32_t range = 3600;
-
     if(req->hasParam("range"))
       range = req->getParam("range")->value().toInt();
 
@@ -152,21 +144,15 @@ void webInit()
   });
 
   server.on("/api/history/table", HTTP_GET, [](AsyncWebServerRequest *req){
-    Serial.printf("TABLE REQUEST rowCount=%d\n", historyGetRowCount());
     req->send(200, "application/json", historyGetTableJson());
   });
 
 
   server.begin();
-
-  WEBDBG("[WEB] server ready\n");
 }
 
 
-
-/* ============================================================
-   LOOP  (BLEIBT – dein Live-Status!)
-   ============================================================ */
+/* ============================================================ */
 void webLoop(float tds, const char* stateName, float litersNow)
 {
   static uint32_t lastCnt=0;
@@ -180,7 +166,7 @@ void webLoop(float tds, const char* stateName, float litersNow)
     lastT=millis();
   }
 
-  float left = 50.0 - litersNow; // später CFG("maxProductionLiters")
+  float left = settings.maxProductionLiters - litersNow;
 
   if(millis()-lastSend>300){
     wsBroadcast(tds,stateName,litersNow,flow,left);

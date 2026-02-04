@@ -3,6 +3,65 @@
    ============================================================ */
 
 let ws;
+let chart;
+let histTimer;
+
+let lastMdnsName = "";
+let lastState    = "";
+
+/* ===== Farben für Kurven + Achsen ===== */
+const COL_TDS  = "#4da3ff";   // blau
+const COL_FLOW = "#35c759";   // grün
+const COL_PROD = "#ff9f0a";   // orange
+
+
+
+/* ============================================================
+   SMALL TOAST
+   ============================================================ */
+
+function toast(msg, ms=2200)
+{
+  let t = document.getElementById("toast");
+
+  if(!t){
+    t = document.createElement("div");
+    t.id = "toast";
+    t.style.cssText = `
+      position:fixed;
+      bottom:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:#333;
+      color:#fff;
+      padding:10px 18px;
+      border-radius:8px;
+      font-size:14px;
+      opacity:0;
+      transition:opacity .2s;
+      z-index:9999;
+    `;
+    document.body.appendChild(t);
+  }
+
+  t.innerText = msg;
+  t.style.opacity = 1;
+
+  setTimeout(()=> t.style.opacity = 0, ms);
+}
+
+
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function historyVisible()
+{
+  const el = document.getElementById("hist");
+  return el && !el.hidden;
+}
+
 
 
 /* ============================================================
@@ -17,9 +76,15 @@ function show(id)
   const el = document.getElementById(id);
   if(el) el.hidden = false;
 
-  if(id === "hist" && !chart)
-    initHistory();
+  if(id === "hist")
+  {
+    if(!chart) initHistory();
+
+    /* sofort laden */
+    loadHistory(true);
+  }
 }
+
 
 
 /* ============================================================
@@ -30,24 +95,29 @@ function connectWS()
 {
   ws = new WebSocket(`ws://${location.host}/ws`);
 
-  ws.onopen = () => {
-    console.log("[WS] connected");
-  };
+  ws.onopen = () => console.log("[WS] connected");
 
   ws.onclose = () => {
     console.log("[WS] reconnect...");
     setTimeout(connectWS, 1500);
   };
 
-  ws.onmessage = (ev) => {
-
+  ws.onmessage = (ev) =>
+  {
     const d = JSON.parse(ev.data);
 
-    if(d.state !== undefined) {
+    if(d.state !== undefined)
+    {
       state.innerText = d.error ? (d.state + " : " + d.error) : d.state;
-      updateButtons(d.state);   // <<< ADD
-    }
 
+      updateButtons(d.state);
+
+      /* ⭐ sofort History aktualisieren bei Statewechsel */
+      if(d.state !== lastState && historyVisible())
+        loadHistory(true);
+
+      lastState = d.state;
+    }
 
     if(d.tds !== undefined)    tds.innerText    = Number(d.tds).toFixed(1);
     if(d.liters !== undefined) liters.innerText = Number(d.liters).toFixed(2);
@@ -57,24 +127,27 @@ function connectWS()
 }
 
 
+
 /* ============================================================
-   START / STOP COMMANDS (robust!)
+   START / STOP
    ============================================================ */
 
 function startCmd()
 {
-  if(ws && ws.readyState === WebSocket.OPEN)
+  if(ws?.readyState === WebSocket.OPEN)
     ws.send("start");
 }
 
 function stopCmd()
 {
-  if(ws && ws.readyState === WebSocket.OPEN)
+  if(ws?.readyState === WebSocket.OPEN)
     ws.send("stop");
 }
 
+
+
 /* ============================================================
-   BUTTON STATE CONTROL (ADD)
+   BUTTON STATE
    ============================================================ */
 
 function updateButtons(stateName)
@@ -94,6 +167,8 @@ function updateButtons(stateName)
   }
 }
 
+
+
 /* ============================================================
    SETTINGS SAVE
    ============================================================ */
@@ -104,7 +179,7 @@ function saveSettings()
     "pulsesPerLiterIn",
     "pulsesPerLiterOut",
     "tdsLimit",
-    "flushTimeSec",
+    "maxFlushTimeSec",
     "maxRuntimeSec",
     "maxProductionLiters",
     "autoStart",
@@ -116,13 +191,15 @@ function saveSettings()
 
   const data = {};
 
-  ids.forEach(id => {
-
+  ids.forEach(id =>
+  {
     const el = document.getElementById(id);
     if(!el) return;
 
     if(el.type === "checkbox")
       data[id] = el.checked;
+    else if(el.type === "number")
+      data[id] = Number(el.value);
     else
       data[id] = el.value;
   });
@@ -132,36 +209,32 @@ function saveSettings()
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   })
-  .then(() => alert("Settings gespeichert"))
-  .catch(() => alert("Fehler beim Speichern"));
+  .then(() =>
+  {
+    if(data.mDNSName !== lastMdnsName)
+      toast("Settings gespeichert – Neustart erforderlich");
+    else
+      toast("Settings gespeichert");
+
+    lastMdnsName = data.mDNSName;
+  })
+  .catch(() => toast("Fehler beim Speichern"));
 }
 
 
+
 /* ============================================================
-   SETTINGS LOAD (auto fill UI)
+   SETTINGS LOAD
    ============================================================ */
 
 function loadSettings()
 {
   fetch("/api/settings")
-    .then(r => {
-
-      if(!r.ok) throw new Error("HTTP error");
-
-      return r.text();   // erstmal als Text holen
-    })
-    .then(txt => {
-
-      if(!txt) return {};   // leere Antwort = leeres Objekt
-
-      return JSON.parse(txt);
-    })
-    .then(cfg => {
-
-      if(!cfg) return;
-
-      Object.keys(cfg).forEach(k => {
-
+    .then(r => r.json())
+    .then(cfg =>
+    {
+      Object.keys(cfg).forEach(k =>
+      {
         const el = document.getElementById(k);
         if(!el) return;
 
@@ -170,32 +243,16 @@ function loadSettings()
         else
           el.value = cfg[k];
       });
-    })
-    .catch(err => {
-      console.log("[CFG] no config yet (normal on first boot)");
+
+      lastMdnsName = cfg.mDNSName || "";
     });
 }
 
 
 
 /* ============================================================
-   INIT
+   HISTORY PAGE (Chart.js)
    ============================================================ */
-
-window.onload = () =>
-{
-  show("home");
-  connectWS();
-  loadSettings();
-};
-
-
-/* ============================================================
-   HISTORY PAGE
-   ============================================================ */
-
-let chart;
-let histTimer;
 
 function initHistory()
 {
@@ -206,43 +263,102 @@ function initHistory()
     data: {
       labels: [],
       datasets: [
-        { label: "TDS",  data: [], yAxisID: "y1" },
-        { label: "Flow", data: [], yAxisID: "y2" },
-        { label: "Liter",data: [], yAxisID: "y2" }
+        {
+          label: "TDS",
+          data: [],
+          yAxisID: "yTds",
+          borderColor: COL_TDS,
+          backgroundColor: COL_TDS,
+          tension: 0.25
+        },
+        {
+          label: "Flow",
+          data: [],
+          yAxisID: "yFlow",
+          borderColor: COL_FLOW,
+          backgroundColor: COL_FLOW,
+          tension: 0.25
+        },
+        {
+          label: "Liter",
+          data: [],
+          yAxisID: "yProd",
+          borderColor: COL_PROD,
+          backgroundColor: COL_PROD,
+          tension: 0.25
+        }
       ]
     },
     options: {
       animation:false,
       responsive:true,
+
       scales:{
-        y1:{ type:"linear", position:"left" },
-        y2:{ type:"linear", position:"right" }
+
+        /* ===== TDS ===== */
+        yTds:{
+          type:"linear",
+          position:"left",
+          ticks:{ color:COL_TDS },
+          title:{
+            display:true,
+            text:"TDS (ppm)",
+            color:COL_TDS
+          },
+          grid:{ color:"#222" }
+        },
+
+        /* ===== FLOW ===== */
+        yFlow:{
+          type:"linear",
+          position:"right",
+          ticks:{ color:COL_FLOW },
+          title:{
+            display:true,
+            text:"Flow (L/min)",
+            color:COL_FLOW
+          },
+          grid:{ drawOnChartArea:false }
+        },
+
+        /* ===== VOLUME ===== */
+        yProd:{
+          type:"linear",
+          position:"right",
+          offset:true,
+          ticks:{ color:COL_PROD },
+          title:{
+            display:true,
+            text:"Volume (L)",
+            color:COL_PROD
+          },
+          grid:{ drawOnChartArea:false }
+        }
       }
     }
   });
 
-  loadHistory();
-
+  /* 30s fallback */
   histTimer = setInterval(loadHistory, 30000);
-
-  document.getElementById("rangeSel").onchange = loadHistory;
 }
+
 
 
 /* ================== SERIES ================== */
 
-function loadHistory()
+function loadHistory(force=false)
 {
+  if(!historyVisible() && !force) return;
+
   const sec = document.getElementById("rangeSel").value;
 
   fetch("/api/history/series?range="+sec)
     .then(r => r.json())
-    .then(d => {
-
+    .then(d =>
+    {
       const len = d.tds.length;
 
       chart.data.labels = Array(len).fill("");
-
       chart.data.datasets[0].data = d.tds;
       chart.data.datasets[1].data = d.flow;
       chart.data.datasets[2].data = d.prod;
@@ -259,21 +375,21 @@ function loadHistory()
 }
 
 
+
 /* ================== TABLE ================== */
 
 function loadHistoryTable()
 {
   fetch("/api/history/table")
     .then(r => r.json())
-    .then(rows => {
-
+    .then(rows =>
+    {
       const body = document.querySelector("#histTable tbody");
       body.innerHTML = "";
 
-      rows.forEach(r => {
-
+      rows.forEach(r =>
+      {
         const tr = document.createElement("tr");
-
         const fmt = t => t ? new Date(t*1000).toLocaleString() : "";
 
         tr.innerHTML =
@@ -286,3 +402,16 @@ function loadHistoryTable()
       });
     });
 }
+
+
+
+/* ============================================================
+   INIT
+   ============================================================ */
+
+window.onload = () =>
+{
+  show("home");
+  connectWS();
+  loadSettings();
+};

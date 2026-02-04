@@ -1,11 +1,11 @@
 /*********************************************************************
-  OSMOSE CONTROLLER – V3.0 CLEAN ADDITIVE (CFG ENABLED VERSION)
+  OSMOSE CONTROLLER – V3.0 CLEAN ADDITIVE
 
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
 
-#define DEBUG_LEVEL 0
+#define DEBUG_LEVEL 1
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -18,6 +18,8 @@
 #include "web.h"
 #include "config_settings.h"
 #include "history.h"
+#include "settings.h"
+
 
 
 // ================= DEBUG =================
@@ -47,7 +49,7 @@
 const char* WIFI_SSID="VanFranz";
 const char* WIFI_PASS="5032650326";
 const char* AP_SSID="osmose";
-const char* AP_PASS="osmose123";
+
 bool wifiConnected=false;
 
 String lastErrorMsg = "";
@@ -64,6 +66,11 @@ const char* NTP_SERVER="pool.ntp.org";
 const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
 
+static float producedLiters = 0.0f;
+
+static bool productionLockedManual = false;
+static bool productionLockedAuto   = false;
+static bool lastLowSwitch = false;
 
 // ================= PINMAP =================
 #define PIN_TDS_ADC     2
@@ -95,6 +102,7 @@ const int  DST_OFFSET=3600;
 static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
 
+enum State{IDLE,PREPARE,FLUSH,PRODUCTION,INFO,ERROR};
 
 
 // ============================================================
@@ -102,14 +110,15 @@ uint32_t valveClosedTs = 0;
 // ============================================================
 bool inActive(uint8_t p){ return digitalRead(p)==LOW; }
 
-/* ===== CFG enabled (NEU) ===== */
+
 float liters(uint32_t p){
-  return p / CFG("pulsesPerLiterOut", PULSES_PER_LITER_OUT);
+  return p / settings.pulsesPerLiterOut;
 }
 
 float litersIn(uint32_t p){
-  return p / CFG("pulsesPerLiterIn", PULSES_PER_LITER_IN);
+  return p / settings.pulsesPerLiterIn;
 }
+
 
 float rawToTds(int raw){
   float v = raw * 3.3f / 4095.0f;
@@ -117,6 +126,44 @@ float rawToTds(int raw){
 }
 
 
+void prodAdd(float d)
+{
+  producedLiters += d;
+}
+
+bool prodCheckLimit(bool isManualMode)
+{
+  float maxProd = settings.maxProductionLiters;
+
+  if(maxProd <= 0) return false;
+
+  if(producedLiters >= maxProd)
+  {
+    if(isManualMode)
+      productionLockedManual = true;
+    else
+      productionLockedAuto = true;
+
+    return true;
+  }
+
+  return false;
+}
+
+void prodHandleResets(bool lowSwitch, bool switchOffToOn)
+{
+  if(productionLockedAuto && lastLowSwitch && !lowSwitch){
+    producedLiters = 0;
+    productionLockedAuto = false;
+  }
+
+  if(productionLockedManual && switchOffToOn){
+    producedLiters = 0;
+    productionLockedManual = false;
+  }
+
+  lastLowSwitch = lowSwitch;
+}
 
 
 // ============================================================
@@ -271,11 +318,12 @@ void startWifi(){
   if(WiFi.status()==WL_CONNECTED){
 
     wifiConnected=true;
-    MDNS.begin(CFG("mDNSName","osmose"));
+    MDNS.begin(settings.mDNSName.c_str());
     mqtt.setServer(
-      CFG("mqttHost",MQTT_HOST),
-      CFG("mqttPort",1883)
+      settings.mqttHost.c_str(),
+      settings.mqttPort
     );
+
 
     configTime(GMT_OFFSET,DST_OFFSET,NTP_SERVER);
 
@@ -286,7 +334,8 @@ void startWifi(){
     DBG_INFO("[WiFi] AP MODE\n");
 
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID,AP_PASS);
+    WiFi.softAP(AP_SSID, settings.apPassword.c_str());
+
   }
 }
 
@@ -296,23 +345,31 @@ void startWifi(){
 // ============================================================
 bool blinkFast(){ return (millis()/60)%2; }
 bool blinkSlow(){ return (millis()/500)%2; }
+bool blinkInfo(){ return (millis()%1000) < 100; } // 0.1s an
 
-void updateLEDs(int s){
+void updateLEDs(State s){
   setOut(LedWLAN, wifiConnected?true:blinkSlow());
-  setOut(LedBezug, s==3);
-  setOut(LedError, s==4);
+  setOut(LedBezug, s==PRODUCTION);
+
   bool sp=false;
-  if(s==1) sp=blinkFast();
-  else if(s==2) sp=blinkSlow();
+  if(s==PREPARE) sp=blinkFast();
+  else if(s==FLUSH) sp=blinkSlow();
   setOut(LedSpuelen,sp);
+
+  if(s==ERROR)
+    setOut(LedError,true);
+  else if(s==INFO)
+    setOut(LedError,blinkInfo());
+  else
+    setOut(LedError,false);
 }
+
 
 
 // ============================================================
 // StateMachine (ORIGINAL + hooks ADD)
 // ============================================================
-enum State{IDLE,PREPARE,FLUSH,PRODUCTION,ERROR};
-const char* sName[]={"IDLE","PREPARE","FLUSH","PRODUCTION","ERROR"};
+const char* sName[]={"IDLE","PREPARE","FLUSH","PRODUCTION","INFO","ERROR"};
 
 State state=IDLE,lastState=IDLE;
 uint32_t stateStart=0;
@@ -347,14 +404,14 @@ void setState(State s)
 
       prodEnd(cntIn, cntOut);
       historyEndProduction(reasonBuf);
-      Serial.printf("ReasonBuf=%s",reasonBuf);
+      
     }
   }
 
   state = s;
   stateStart = millis();
 
-  if(s != ERROR)
+  if(s != ERROR && s != INFO)
     lastErrorMsg = "";
 }
 
@@ -365,6 +422,11 @@ void enterError(const char* m){
   DBG_ERR("!!! ERROR: %s !!!\n",m);
   lastErrorMsg = m;          // ⭐ merken
   setState(ERROR);
+}
+
+void enterInfo(const char* m){
+  lastErrorMsg = m;
+  setState(INFO);
 }
 
 void hardResetToIdle()
@@ -414,11 +476,12 @@ void setup(){
 
   allOff();
 
-  startWifi();
-  webInit();
   configEnsureExists();
   configLoad();
+  settingsLoad();   // ⭐ zuerst laden
 
+  startWifi();      // ⭐ erst danach benutzen
+  webInit();
 }
 
 
@@ -431,7 +494,7 @@ void loop(){
   mqtt.loop();
 
   static bool firstBoot=true;
-  if(firstBoot && CFG("autoStart",false)){
+  if(firstBoot && settings.autoStart){
     firstBoot=false;
     setState(PREPARE);
   }
@@ -511,7 +574,7 @@ void loop(){
   // ===== StateMachine =====
   if(!off){
 
-    switch(state){
+    switch(state) {
 
       case IDLE:
         // warten auf Start (Web / Manual / AutoStart)
@@ -527,52 +590,56 @@ void loop(){
       case FLUSH:
         setOut(OtoS,true);
 
-        if (tds < CFG("tdsLimit",TDS_LIMIT)) {
+        if (tds < settings.tdsLimit) {
           setOut(OtoS,false);
           prodStartCnt=cntOut;
           setState(PRODUCTION);
         }
 
-        if(millis()-stateStart > CFG("flushTimeSec",FLUSH_TIMEOUT_MS/1000)*1000)
+       if(millis() - stateStart > settings.maxFlushTimeSec * 1000)
           enterError("Flush timeout");
         break;
 
-  case PRODUCTION: {
-    setOut(OOut,true);
+      case PRODUCTION: {
+        setOut(OOut,true);
   
-    if(tds > TDS_MAX_ALLOWED)
-      enterError("TDS too high");
+        if(tds > TDS_MAX_ALLOWED)
+          enterError("TDS too high");
   
-    float produced = liters(cntOut - prodStartCnt);
-    prodAdd(produced - producedLiters);
+        float produced = liters(cntOut - prodStartCnt);
+        prodAdd(produced - producedLiters);
 
-    bool isManualMode = inActive(PIN_SMANU);
-    bool lowSwitch    = inActive(PIN_WLOW);
+        bool isManualMode = inActive(PIN_SMANU);
+        bool lowSwitch    = inActive(PIN_WLOW);
 
-    if(prodCheckLimit(isManualMode)){
-      setState(IDLE);
-      break;
-    }
+        if(prodCheckLimit(isManualMode)){
+          setState(IDLE);
+          break;
+        }
 
-    bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
-    bool switchOffToOn = (!lastSwitchState && switchNow);
-    lastSwitchState = switchNow;
+        bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
+        bool switchOffToOn = (!lastSwitchState && switchNow);
+        lastSwitchState = switchNow;
 
-    prodHandleResets(lowSwitch, switchOffToOn);
+        prodHandleResets(lowSwitch, switchOffToOn);
 
-    /* ===== SETTINGS: production volume limit ===== */
-    if(produced > CFG("maxProductionLiters", MAX_LITERS))
-      enterError("Volume limit");
+        /* ===== SETTINGS: production volume limit ===== */
+        if(produced > settings.maxProductionLiters)
+          enterInfo("Volume limit");
 
-    /* ===== SETTINGS: runtime safety limit (HIER!) ===== */
-    if(millis() - stateStart > CFG("maxRuntimeSec", 300) * 1000)
-      enterError("Max runtime reached");
 
-    break;
-}
-   case ERROR:
-        allOff();
+        /* ===== SETTINGS: runtime safety limit (HIER!) ===== */
+        if(millis() - stateStart > settings.maxRuntimeSec * 1000)
+          enterInfo("Max runtime reached");
+
         break;
+      }
+      case ERROR:
+        allOff();
+      break;
+      case INFO:
+       allOff();
+      break;
     }
   }
 

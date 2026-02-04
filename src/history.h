@@ -1,6 +1,16 @@
 #pragma once
 #include <Arduino.h>
 
+/* ============================================================
+   HISTORY UPDATE CALLBACK ⭐ NEU
+   ============================================================ */
+
+typedef void (*HistoryUpdateCallback)();
+
+void historySetUpdateCallback(HistoryUpdateCallback cb);
+
+/* ============================================================ */
+
 void historyInit();
 
 void historyAddSample(float tds, float flow, float produced);

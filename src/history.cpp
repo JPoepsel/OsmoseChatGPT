@@ -10,12 +10,18 @@
 #define MAX_SAMPLES_24H (24*60*2)   // alle 30s = 2880
 #define MAX_ROWS 100
 
+
+/* ============================================================
+   SERIES BUFFERS (RAM)
+   ============================================================ */
+
 static float tdsBuf[MAX_SAMPLES_24H];
 static float flowBuf[MAX_SAMPLES_24H];
 static float prodBuf[MAX_SAMPLES_24H];
 
 static uint16_t idx = 0;
 static uint32_t lastSampleMs = 0;
+
 
 /* ============================================================
    TABLE (persistent)
@@ -24,8 +30,8 @@ static uint32_t lastSampleMs = 0;
 struct Row{
   time_t startTs;
   time_t endTs;
-  float liters;
-  char reason[20];
+  float  liters;
+  char   reason[20];
 };
 
 static Row rows[MAX_ROWS];
@@ -35,22 +41,42 @@ static int currentRow = -1;
 static const char* FILE_NAME="/history.bin";
 
 
+/* ============================================================
+   ⭐⭐⭐ UPDATE CALLBACK (NEU – PUSH STATT POLLING)
+   ============================================================ */
+
+static HistoryUpdateCallback updateCb = nullptr;
+
+void historySetUpdateCallback(HistoryUpdateCallback cb)
+{
+  updateCb = cb;
+}
+
+
+/* ============================================================ */
+
 uint8_t historyGetRowCount()
 {
   return rowCount;
 }
 
-/* ============================================================ */
+
+/* ============================================================
+   SAVE / LOAD
+   ============================================================ */
 
 void saveTable()
 {
   File f = SPIFFS.open(FILE_NAME,"w");
   if(!f) return;
 
-  f.write((uint8_t*)&rowCount, sizeof(rowCount));   // ⭐ NEU
+  f.write((uint8_t*)&rowCount, sizeof(rowCount));
   f.write((uint8_t*)rows, sizeof(rows));
 
   f.close();
+
+  // ⭐⭐⭐ SOFORT CLIENT INFORMIEREN ⭐⭐⭐
+  if(updateCb) updateCb();
 }
 
 
@@ -63,16 +89,17 @@ void loadTable()
 
   size_t n = 0;
 
-  n += f.read((uint8_t*)&rowCount, sizeof(rowCount));   // ⭐ NEU
+  n += f.read((uint8_t*)&rowCount, sizeof(rowCount));
   n += f.read((uint8_t*)rows, sizeof(rows));
 
   if(n != sizeof(rowCount) + sizeof(rows)){
-    memset(rows, 0, sizeof(rows));
+    memset(rows,0,sizeof(rows));
     rowCount = 0;
   }
 
   f.close();
 }
+
 
 /* ============================================================ */
 
@@ -81,11 +108,15 @@ void historyInit()
   loadTable();
 }
 
-/* ============================================================ */
+
+/* ============================================================
+   SERIES SAMPLES
+   ============================================================ */
 
 void historyAddSample(float tds, float flow, float produced)
 {
   if(millis() - lastSampleMs < SAMPLE_INTERVAL_MS) return;
+
   lastSampleMs = millis();
 
   tdsBuf[idx]  = tds;
@@ -96,15 +127,15 @@ void historyAddSample(float tds, float flow, float produced)
 
   if(currentRow >= 0 && currentRow < MAX_ROWS)
     rows[currentRow].liters = produced;
-
 }
 
-/* ============================================================ */
+
+/* ============================================================
+   START / END PRODUCTION
+   ============================================================ */
 
 void historyStartProduction()
 {
-  Serial.println("HIST START");
-
   currentRow = 0;
 
   uint8_t moveCount = min(rowCount, (uint8_t)(MAX_ROWS-1));
@@ -114,9 +145,8 @@ void historyStartProduction()
   rows[0] = {};
   rows[0].startTs = time(nullptr);
 
-  if(rowCount < MAX_ROWS) rowCount++;
-
-  Serial.printf("rowCount=%d\n", rowCount);
+  if(rowCount < MAX_ROWS)
+    rowCount++;
 
   saveTable();
 }
@@ -124,31 +154,34 @@ void historyStartProduction()
 
 void historyEndProduction(const char* reason)
 {
-  Serial.println("HIST END");
+  if(currentRow < 0) return;
 
-  if(currentRow < 0){
-    Serial.println("NO CURRENT ROW");
-    return;
-  }
+  Row &r = rows[currentRow];
 
-  rows[currentRow].endTs = time(nullptr);
-  memcpy(rows[currentRow].reason,reason,sizeof(rows[currentRow].reason));
+  r.endTs = time(nullptr);
 
-  Serial.printf("saved row with liters=%.2f\n", rows[currentRow].liters);
+  if(!reason || !reason[0])
+    reason = "Stopped";
+
+  strncpy(r.reason, reason, sizeof(r.reason)-1);
+  r.reason[sizeof(r.reason)-1] = 0;
 
   currentRow = -1;
 
   saveTable();
 }
 
-/* ============================================================ */
+
+/* ============================================================
+   JSON – SERIES
+   ============================================================ */
 
 String historyGetSeriesJson(uint32_t seconds)
 {
   uint16_t samples = seconds / 30;
   if(samples > MAX_SAMPLES_24H) samples = MAX_SAMPLES_24H;
 
-  JsonDocument doc;   // <<< nur das!
+  JsonDocument doc;
 
   JsonArray t = doc["tds"].to<JsonArray>();
   JsonArray f = doc["flow"].to<JsonArray>();
@@ -170,13 +203,13 @@ String historyGetSeriesJson(uint32_t seconds)
 }
 
 
-/* ============================================================ */
+/* ============================================================
+   JSON – TABLE
+   ============================================================ */
 
 String historyGetTableJson()
 {
-  Serial.printf("TABLE REQUEST rowCount=%d\n", rowCount);
-
-  JsonDocument doc;   // <<< nur das!
+  JsonDocument doc;
 
   JsonArray arr = doc.to<JsonArray>();
 
