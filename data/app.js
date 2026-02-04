@@ -9,12 +9,6 @@ let histTimer;
 let lastMdnsName = "";
 let lastState    = "";
 
-/* ===== Farben für Kurven + Achsen ===== */
-const COL_TDS  = "#4da3ff";   // blau
-const COL_FLOW = "#35c759";   // grün
-const COL_PROD = "#ff9f0a";   // orange
-
-
 
 /* ============================================================
    SMALL TOAST
@@ -51,7 +45,6 @@ function toast(msg, ms=2200)
 }
 
 
-
 /* ============================================================
    HELPERS
    ============================================================ */
@@ -61,7 +54,6 @@ function historyVisible()
   const el = document.getElementById("hist");
   return el && !el.hidden;
 }
-
 
 
 /* ============================================================
@@ -79,12 +71,9 @@ function show(id)
   if(id === "hist")
   {
     if(!chart) initHistory();
-
-    /* sofort laden */
     loadHistory(true);
   }
 }
-
 
 
 /* ============================================================
@@ -112,7 +101,6 @@ function connectWS()
 
       updateButtons(d.state);
 
-      /* ⭐ sofort History aktualisieren bei Statewechsel */
       if(d.state !== lastState && historyVisible())
         loadHistory(true);
 
@@ -125,7 +113,6 @@ function connectWS()
     if(d.left !== undefined)   left.innerText   = Number(d.left).toFixed(2);
   };
 }
-
 
 
 /* ============================================================
@@ -145,7 +132,6 @@ function stopCmd()
 }
 
 
-
 /* ============================================================
    BUTTON STATE
    ============================================================ */
@@ -157,7 +143,8 @@ function updateButtons(stateName)
 
   if(!start || !stop) return;
 
-  if(stateName === "IDLE" || stateName === "ERROR"){
+  /* ⭐ INFO wie IDLE/ERROR behandeln */
+  if(stateName === "IDLE" || stateName === "ERROR" || stateName === "INFO"){
     start.disabled = false;
     stop.disabled  = true;
   }
@@ -166,7 +153,6 @@ function updateButtons(stateName)
     stop.disabled  = false;
   }
 }
-
 
 
 /* ============================================================
@@ -222,7 +208,6 @@ function saveSettings()
 }
 
 
-
 /* ============================================================
    SETTINGS LOAD
    ============================================================ */
@@ -249,9 +234,8 @@ function loadSettings()
 }
 
 
-
 /* ============================================================
-   HISTORY PAGE (Chart.js)
+   HISTORY PAGE
    ============================================================ */
 
 function initHistory()
@@ -263,83 +247,25 @@ function initHistory()
     data: {
       labels: [],
       datasets: [
-        {
-          label: "TDS",
-          data: [],
-          yAxisID: "yTds",
-          borderColor: COL_TDS,
-          backgroundColor: COL_TDS,
-          tension: 0.25
-        },
-        {
-          label: "Flow",
-          data: [],
-          yAxisID: "yFlow",
-          borderColor: COL_FLOW,
-          backgroundColor: COL_FLOW,
-          tension: 0.25
-        },
-        {
-          label: "Liter",
-          data: [],
-          yAxisID: "yProd",
-          borderColor: COL_PROD,
-          backgroundColor: COL_PROD,
-          tension: 0.25
-        }
+        { label: "TDS (ppm)",  data: [], yAxisID: "yTds",  borderColor:"#00bcd4" },
+        { label: "Flow (L/min)", data: [], yAxisID: "yFlow", borderColor:"#4caf50" },
+        { label: "Liter (L)", data: [], yAxisID: "yProd", borderColor:"#ff9800" }
       ]
     },
     options: {
       animation:false,
       responsive:true,
-
       scales:{
-
-        /* ===== TDS ===== */
-        yTds:{
-          type:"linear",
-          position:"left",
-          ticks:{ color:COL_TDS },
-          title:{
-            display:true,
-            text:"TDS (ppm)",
-            color:COL_TDS
-          },
-          grid:{ color:"#222" }
-        },
-
-        /* ===== FLOW ===== */
-        yFlow:{
-          type:"linear",
-          position:"right",
-          ticks:{ color:COL_FLOW },
-          title:{
-            display:true,
-            text:"Flow (L/min)",
-            color:COL_FLOW
-          },
-          grid:{ drawOnChartArea:false }
-        },
-
-        /* ===== VOLUME ===== */
-        yProd:{
-          type:"linear",
-          position:"right",
-          offset:true,
-          ticks:{ color:COL_PROD },
-          title:{
-            display:true,
-            text:"Volume (L)",
-            color:COL_PROD
-          },
-          grid:{ drawOnChartArea:false }
-        }
+        yTds:{  type:"linear", position:"left",  title:{display:true,text:"ppm"},  ticks:{color:"#00bcd4"} },
+        yFlow:{ type:"linear", position:"right", title:{display:true,text:"L/min"},ticks:{color:"#4caf50"} },
+        yProd:{ type:"linear", position:"right", offset:true, title:{display:true,text:"Liter"}, ticks:{color:"#ff9800"} }
       }
     }
   });
 
-  /* 30s fallback */
   histTimer = setInterval(loadHistory, 30000);
+
+  document.getElementById("rangeSel").onchange = () => loadHistory(true);
 }
 
 
@@ -365,15 +291,9 @@ function loadHistory(force=false)
 
       chart.update();
 
-      const last = len-1;
-
-      document.getElementById("lastValues").innerText =
-        `TDS: ${d.tds[last]?.toFixed(1)}  |  Flow: ${d.flow[last]?.toFixed(2)}  |  Liter: ${d.prod[last]?.toFixed(2)}`;
-
       loadHistoryTable();
     });
 }
-
 
 
 /* ================== TABLE ================== */
@@ -402,7 +322,6 @@ function loadHistoryTable()
       });
     });
 }
-
 
 
 /* ============================================================

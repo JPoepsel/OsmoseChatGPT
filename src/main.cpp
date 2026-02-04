@@ -5,7 +5,7 @@
   nur additive Settings-Integration
 *********************************************************************/
 
-#define DEBUG_LEVEL 1
+#define DEBUG_LEVEL 4
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -71,6 +71,8 @@ static float producedLiters = 0.0f;
 static bool productionLockedManual = false;
 static bool productionLockedAuto   = false;
 static bool lastLowSwitch = false;
+static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzlimit
+
 
 // ================= PINMAP =================
 #define PIN_TDS_ADC     2
@@ -404,7 +406,8 @@ void setState(State s)
 
       prodEnd(cntIn, cntOut);
       historyEndProduction(reasonBuf);
-      
+      cntIn  = 0;
+      cntOut = 0;
     }
   }
 
@@ -439,6 +442,8 @@ void hardResetToIdle()
   valveClosedTs = millis();
 
   producedLiters = 0;
+  autoBlocked = false;
+
 
   setState(IDLE);   // ✅ nur das!
 }
@@ -508,8 +513,10 @@ void loop(){
   // ===== Web Start =====
   if(webStartRequest){
     webStartRequest=false;
+    autoBlocked=false;   // ⭐ hier!
     setState(PREPARE);
   }
+
 
   // ===== Web Stop =====
   if(webStopRequest){
@@ -518,12 +525,16 @@ void loop(){
   }
 
   // ===== Manual switch start (0 -> MANU rising edge) =====
+ 
   bool manualNow = inActive(PIN_SMANU);
 
-  if(state == IDLE && manualNow && !lastSwitchState){
+  if(state == IDLE && manualNow && !lastSwitchState) {
     DBG_INFO("[START] manual switch\n");
+    autoBlocked=false;   
     setState(PREPARE);
   }
+
+
 
   lastSwitchState = manualNow;
 
@@ -576,10 +587,16 @@ void loop(){
 
     switch(state) {
 
-      case IDLE:
-        // warten auf Start (Web / Manual / AutoStart)
-      break;
+      case IDLE: {
+        bool autoMode   = inActive(PIN_SAUTO);
+        bool manualMode = inActive(PIN_SMANU);
 
+        // ⭐ echter Auto-Start (nur wenn nicht blockiert)
+        if(autoMode && !manualMode && !autoBlocked) 
+          setState(PREPARE);
+  
+      }
+      break;
       case PREPARE:
         setOut(Relay,true);
         setOut(WIn,true);
@@ -623,14 +640,23 @@ void loop(){
 
         prodHandleResets(lowSwitch, switchOffToOn);
 
-        /* ===== SETTINGS: production volume limit ===== */
-        if(produced > settings.maxProductionLiters)
-          enterInfo("Volume limit");
+        if(produced > settings.maxProductionLiters) {
+          if(isManualMode)
+            enterInfo("Volume limit");
+          else {
+            autoBlocked = true;
+            enterError("Volume limit");
+          }
+        }
 
-
-        /* ===== SETTINGS: runtime safety limit (HIER!) ===== */
-        if(millis() - stateStart > settings.maxRuntimeSec * 1000)
-          enterInfo("Max runtime reached");
+        if(millis() - stateStart > settings.maxRuntimeSec * 1000) {
+          if(isManualMode)
+            enterInfo("Max runtime reached");
+          else {
+            autoBlocked = true;
+            enterError("Max runtime reached");
+          }
+        }
 
         break;
       }
