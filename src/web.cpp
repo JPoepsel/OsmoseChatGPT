@@ -4,6 +4,8 @@
 #include <AsyncTCP.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include <vector>
+#include <algorithm>
 
 #include "history.h"
 #include "config_settings.h"
@@ -45,7 +47,8 @@ static void wsBroadcast(float tds,
                         const char* stateName,
                         float litersNow,
                         float flowLpm,
-                        float litersLeft)
+                        float litersLeft,
+                        float runtimeLeft)
 {
   JsonDocument doc;
 
@@ -55,6 +58,7 @@ static void wsBroadcast(float tds,
   doc["liters"]=litersNow;
   doc["flow"]=flowLpm;
   doc["left"]=litersLeft;
+  doc["timeLeft"] = runtimeLeft;
 
   String s;
   serializeJson(doc,s);
@@ -82,7 +86,6 @@ void webInit()
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
-  /* ⭐⭐⭐ HIER REGISTRIEREN ⭐⭐⭐ */
   historySetUpdateCallback(onHistoryUpdate);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -116,6 +119,71 @@ void webInit()
   });
 
 
+ /* ================= WIFI SCAN (async, WDT-safe) ================= */
+server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
+
+  int status = WiFi.scanComplete();
+  Serial.printf("[SCAN] status=%d\n", status);
+
+  // läuft noch
+  if(status == WIFI_SCAN_RUNNING){
+    req->send(202,"text/plain","running");
+    return;
+  }
+
+  // erster Start oder fehlgeschlagen -> async starten
+  if(status == WIFI_SCAN_FAILED || status < 0){
+    Serial.println("[SCAN] start async");
+    WiFi.scanNetworks(true);   // ⭐ async
+    req->send(202,"text/plain","starting");
+    return;
+  }
+
+  // fertig
+  int n = status;
+  Serial.printf("[SCAN] finished: %d\n", n);
+
+  JsonDocument doc;
+  JsonArray arr = doc.to<JsonArray>();
+
+  struct Net { String s; int r; };
+  std::vector<Net> nets;
+
+  for(int i=0;i<n;i++){
+    String ssid = WiFi.SSID(i);
+    int rssi    = WiFi.RSSI(i);
+
+    if(!ssid.length()) continue;
+
+    bool found=false;
+    for(size_t k=0;k<nets.size();k++){
+      if(nets[k].s == ssid){
+        if(rssi > nets[k].r) nets[k].r = rssi;
+        found=true;
+        break;
+      }
+    }
+    if(!found) nets.push_back(Net{ssid,rssi});
+  }
+
+  std::sort(nets.begin(), nets.end(),
+    [](const Net& a,const Net& b){ return a.r>b.r; });
+
+  for(size_t i=0;i<nets.size();i++){
+    JsonObject o = arr.add<JsonObject>();
+    o["ssid"]=nets[i].s;
+    o["rssi"]=nets[i].r;
+  }
+
+  WiFi.scanDelete();
+
+  String s;
+  serializeJson(doc,s);
+  req->send(200,"application/json",s);
+});
+
+
+
   /* SETTINGS POST */
   server.on("/api/settings", HTTP_POST,
     [](AsyncWebServerRequest *request){},
@@ -123,12 +191,13 @@ void webInit()
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t, size_t){
 
       JsonDocument doc;
-      deserializeJson(doc, data);
+      if(deserializeJson(doc,data))
+        return request->send(400,"text/plain","Bad JSON");
 
-      configDoc.clear();
-      configDoc.set(doc);
+     for (JsonPair kv : doc.as<JsonObject>())
+       configDoc[kv.key()] = kv.value();
+
       configSave();
-
       settingsLoad();
 
       request->send(200,"text/plain","OK");
@@ -143,17 +212,23 @@ void webInit()
     req->send(200, "application/json", historyGetSeriesJson(range));
   });
 
+/* REBOOT */
+server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *req){
+  req->send(200,"text/plain","rebooting");
+  delay(200);
+  ESP.restart();
+});
+
   server.on("/api/history/table", HTTP_GET, [](AsyncWebServerRequest *req){
     req->send(200, "application/json", historyGetTableJson());
   });
-
 
   server.begin();
 }
 
 
 /* ============================================================ */
-void webLoop(float tds, const char* stateName, float litersNow)
+void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode, uint32_t runtimeSec)
 {
   static uint32_t lastCnt=0;
   static uint32_t lastT=millis();
@@ -166,10 +241,25 @@ void webLoop(float tds, const char* stateName, float litersNow)
     lastT=millis();
   }
 
-  float left = settings.maxProductionLiters - litersNow;
+  float limit = isManualMode ?
+  settings.maxProductionManualLiters :
+  settings.maxProductionAutoLiters;
+
+  float left = (limit > 0) ? (limit - litersNow) : 0;
+  float runtimeLeft = 0;
+
+  float runLimit = isManualMode ?
+    settings.maxRuntimeManualSec :
+    settings.maxRuntimeAutoSec;
+
+  if(runLimit > 0)  {
+    float elapsed = runtimeSec;
+    runtimeLeft = runLimit - elapsed;
+    if(runtimeLeft < 0) runtimeLeft = 0;
+  }
 
   if(millis()-lastSend>300){
-    wsBroadcast(tds,stateName,litersNow,flow,left);
+    wsBroadcast(tds,stateName,litersNow,flow,left,runtimeLeft);
     lastSend=millis();
   }
 }

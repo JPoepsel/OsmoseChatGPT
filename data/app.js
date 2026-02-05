@@ -111,6 +111,13 @@ function connectWS()
     if(d.liters !== undefined) liters.innerText = Number(d.liters).toFixed(2);
     if(d.flow !== undefined)   flow.innerText   = Number(d.flow).toFixed(2);
     if(d.left !== undefined)   left.innerText   = Number(d.left).toFixed(2);
+    if(d.timeLeft !== undefined) {
+      const sec = Math.max(0, Math.floor(d.timeLeft));
+      const m = Math.floor(sec/60);
+      const s = sec%60;
+      timeLeft.innerText = `${m}m ${s}s`;
+    }
+
   };
 }
 
@@ -166,13 +173,17 @@ function saveSettings()
     "pulsesPerLiterOut",
     "tdsLimit",
     "maxFlushTimeSec",
-    "maxRuntimeSec",
-    "maxProductionLiters",
+    "maxRuntimeAutoSec",
+    "maxRuntimeManualSec",
+    "maxProductionAutoLiters",
+    "maxProductionManualLiters",
     "autoStart",
     "mqttHost",
     "mqttPort",
     "mDNSName",
-    "APPassWord"
+    "APPassWord",
+    "wifiSSID",
+    "wifiPassword"
   ];
 
   const data = {};
@@ -230,6 +241,15 @@ function loadSettings()
       });
 
       lastMdnsName = cfg.mDNSName || "";
+   
+     /* ===== aktuelle SSID sofort anzeigen ===== */
+     const sel = document.getElementById("wifiSSID");
+     if(sel && cfg.wifiSSID) {
+       sel.innerHTML = `<option value="${cfg.wifiSSID}">
+                          ${cfg.wifiSSID}
+                       </option>`;
+     }
+
     });
 }
 
@@ -247,10 +267,36 @@ function initHistory()
     data: {
       labels: [],
       datasets: [
-        { label: "TDS (ppm)",  data: [], yAxisID: "yTds",  borderColor:"#00bcd4" },
-        { label: "Flow (L/min)", data: [], yAxisID: "yFlow", borderColor:"#4caf50" },
-        { label: "Liter (L)", data: [], yAxisID: "yProd", borderColor:"#ff9800" }
+        {
+          label: "TDS (ppm)",
+          data: [],
+          yAxisID: "yTds",
+          borderColor: "#00bcd4",
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.25
+        },
+        {
+          label: "Flow (L/min)",
+          data: [],
+          yAxisID: "yFlow",
+          borderColor: "#4caf50",
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.25
+        },
+        {
+          label: "Liter (L)",
+          data: [],
+          yAxisID: "yProd",
+          borderColor: "#ff9800",
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.25
+        }
       ]
+
+
     },
     options: {
       animation:false,
@@ -334,3 +380,84 @@ window.onload = () =>
   connectWS();
   loadSettings();
 };
+
+function scanWifi()
+{
+  const results = document.getElementById("wifiResults");
+  const input   = document.getElementById("wifiSSID");
+
+  results.hidden = true;
+  results.replaceChildren();
+
+  toast("Scan läuft…");
+
+  function poll()
+  {
+    fetch("/api/wifi/scan")
+      .then(r =>
+      {
+        if(r.status !== 200){
+          setTimeout(poll, 600);
+          return null;
+        }
+        return r.json();
+      })
+      .then(list =>
+      {
+        if(!list) return;
+
+        results.hidden = false;
+
+        list.forEach(n =>
+        {
+          const row = document.createElement("div");
+          row.className = "wifiItem";
+
+          const name = document.createElement("span");
+          name.textContent = n.ssid;
+
+          const rssi = document.createElement("span");
+          rssi.textContent = `${n.rssi} dBm`;
+          rssi.style.color = "#aaa";
+
+          const btn = document.createElement("button");
+          btn.textContent = "Use";
+          btn.onclick = () =>
+          {
+            input.value = n.ssid;   // ⭐ nur SSID übernehmen
+            results.hidden = true;
+          };
+
+          row.appendChild(name);
+          row.appendChild(rssi);
+          row.appendChild(btn);
+
+          results.appendChild(row);
+        });
+
+        toast("Scan fertig");
+      })
+      .catch(()=>toast("Scan Fehler"));
+  }
+
+  poll();
+}
+
+
+function saveAndReboot()
+{
+  saveSettings();
+
+  fetch("/api/reboot", { method:"POST" })
+    .then(()=> toast("Reboot..."));
+}
+
+function togglePw(id)
+{
+  const el = document.getElementById(id);
+
+  if(el.type === "password")
+    el.type = "text";
+  else
+    el.type = "password";
+}

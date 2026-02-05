@@ -5,7 +5,7 @@
   nur additive Settings-Integration
 *********************************************************************/
 
-#define DEBUG_LEVEL 4
+#define DEBUG_LEVEL 2
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -46,8 +46,6 @@
 
 
 // ================= WIFI =================
-const char* WIFI_SSID="VanFranz";
-const char* WIFI_PASS="5032650326";
 const char* AP_SSID="osmose";
 
 bool wifiConnected=false;
@@ -56,7 +54,6 @@ String lastErrorMsg = "";
 
 
 // ================= MQTT =================
-const char* MQTT_HOST="MyRasPi.local";
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
@@ -67,6 +64,8 @@ const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
 
 static float producedLiters = 0.0f;
+uint32_t productionStartMs = 0;   // ⭐ neu
+
 
 static bool productionLockedManual = false;
 static bool productionLockedAuto   = false;
@@ -105,6 +104,22 @@ static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
 
 enum State{IDLE,PREPARE,FLUSH,PRODUCTION,INFO,ERROR};
+// ============================================================
+// StateMachine (ORIGINAL + hooks ADD)
+// ============================================================
+const char* sName[]={"IDLE","PREPARE","FLUSH","PRODUCTION","INFO","ERROR"};
+
+State state=IDLE,lastState=IDLE;
+uint32_t stateStart=0;
+uint32_t prodStartCnt=0;
+
+
+// ============================================================
+// Flow Counter (ORIGINAL)
+// ============================================================
+volatile uint32_t cntIn=0,cntOut=0;
+void IRAM_ATTR isrIn(){cntIn++;}
+void IRAM_ATTR isrOut(){cntOut++;}
 
 
 // ============================================================
@@ -121,6 +136,13 @@ float litersIn(uint32_t p){
   return p / settings.pulsesPerLiterIn;
 }
 
+float producedLitersSafe()
+{
+  int32_t diff = (int32_t)cntOut - (int32_t)prodStartCnt;
+  if(diff < 0) diff = 0;
+  return liters(diff);
+}
+
 
 float rawToTds(int raw){
   float v = raw * 3.3f / 4095.0f;
@@ -135,7 +157,9 @@ void prodAdd(float d)
 
 bool prodCheckLimit(bool isManualMode)
 {
-  float maxProd = settings.maxProductionLiters;
+  float maxProd = isManualMode ?
+    settings.maxProductionManualLiters :
+    settings.maxProductionAutoLiters;
 
   if(maxProd <= 0) return false;
 
@@ -254,18 +278,11 @@ void setOut(uint8_t p,bool on){
 }
 
 void allOff(){
-  DBG_INFO("[OUT] ALL OFF\n");
+  // DBG_INFO("[OUT] ALL OFF\n");
   for(int i=0;i<8;i++) setOut(i,false);
 }
 
 
-
-// ============================================================
-// Flow Counter (ORIGINAL)
-// ============================================================
-volatile uint32_t cntIn=0,cntOut=0;
-void IRAM_ATTR isrIn(){cntIn++;}
-void IRAM_ATTR isrOut(){cntOut++;}
 
 
 // ============================================================
@@ -309,13 +326,17 @@ void mqttPublish(const char* s,float tds,float prod){
 // ============================================================
 void startWifi(){
 
-  DBG_INFO("[WiFi] connecting...\n");
+  DBG_INFO("[WiFi] connecting to %s, %s \n", settings.wifiSSID.c_str(),settings.wifiPassword.c_str());
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID,WIFI_PASS);
+  WiFi.begin(
+    settings.wifiSSID.c_str(),
+    settings.wifiPassword.c_str()
+  );
+
 
   uint32_t t=millis();
-  while(WiFi.status()!=WL_CONNECTED && millis()-t<10000) delay(200);
+  while(WiFi.status()!=WL_CONNECTED && millis()-t<10000) { DBG_INFO("."); delay(200); }
 
   if(WiFi.status()==WL_CONNECTED){
 
@@ -368,14 +389,8 @@ void updateLEDs(State s){
 
 
 
-// ============================================================
-// StateMachine (ORIGINAL + hooks ADD)
-// ============================================================
-const char* sName[]={"IDLE","PREPARE","FLUSH","PRODUCTION","INFO","ERROR"};
 
-State state=IDLE,lastState=IDLE;
-uint32_t stateStart=0;
-uint32_t prodStartCnt=0;
+
 
 void setState(State s)
 {
@@ -386,6 +401,7 @@ void setState(State s)
   /* ========= START Produktion ========= */
   if(state == FLUSH && s == PRODUCTION)
   {
+    productionStartMs = millis();
     prodStart(0, cntIn, cntOut);
     historyStartProduction();
   }
@@ -542,7 +558,8 @@ void loop(){
   lastAdd(raw,tds);
   prodUpdate(tds,cntIn,cntOut);
 
-  historyAddSample(tds, liters(cntIn), liters(cntOut-prodStartCnt));
+  historyAddSample(tds, producedLitersSafe());
+
 
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
 
@@ -640,7 +657,22 @@ void loop(){
 
         prodHandleResets(lowSwitch, switchOffToOn);
 
-        if(produced > settings.maxProductionLiters) {
+        /* =====================================================
+            MODE DEPENDENT LIMITS (AUTO vs MANUAL) ⭐ ADD
+            ===================================================== */
+
+        float maxProd = isManualMode ?
+          settings.maxProductionManualLiters :
+          settings.maxProductionAutoLiters;
+
+        float maxRun = isManualMode ?
+          settings.maxRuntimeManualSec :
+          settings.maxRuntimeAutoSec;
+
+
+        /* ===== Production limit ===== */
+        if(maxProd > 0 && produced > maxProd) {
+
           if(isManualMode)
             enterInfo("Volume limit");
           else {
@@ -649,7 +681,10 @@ void loop(){
           }
         }
 
-        if(millis() - stateStart > settings.maxRuntimeSec * 1000) {
+
+        /* ===== Runtime limit ===== */
+        if(maxRun > 0 && (millis() - stateStart) > maxRun * 1000) {
+
           if(isManualMode)
             enterInfo("Max runtime reached");
           else {
@@ -657,6 +692,7 @@ void loop(){
             enterError("Max runtime reached");
           }
         }
+
 
         break;
       }
@@ -675,16 +711,17 @@ void loop(){
 
   if(state!=lastState || millis()-lastMQTT>10000){
 
-    mqttPublish(sName[state],tds,liters(cntOut-prodStartCnt));
+    mqttPublish(sName[state],tds,producedLitersSafe());
 
     lastState=state;
     lastMQTT=millis();
   }
 
   updateLEDs(state);
-  webLoop(tds, sName[state], liters(cntOut-prodStartCnt));
+  
+  uint32_t runtimeSec = 0;
+  if(state == PRODUCTION)
+    runtimeSec = (millis() - productionStartMs) / 1000;
+  webLoop(tds, sName[state], producedLitersSafe(), manualNow, runtimeSec);
 
-
-
-  delay(120);
 }

@@ -1,3 +1,4 @@
+#include "config_defaults.h"
 #include "config_settings.h"
 #include <SPIFFS.h>
 
@@ -57,21 +58,26 @@ static void configWriteDefaults()
 
   configDoc.clear();
 
-  // ===== Flow calibration
-  configDoc["pulsesPerLiterIn"]    = 100;
-  configDoc["pulsesPerLiterOut"]   = 100;
+  configDoc["pulsesPerLiterIn"]    = DEF_PULSES_PER_LITER_IN;
+  configDoc["pulsesPerLiterOut"]   = DEF_PULSES_PER_LITER_OUT;
 
-  // ===== Process
-  configDoc["tdsLimit"]            = 50;
-  configDoc["maxFlushTimeSec"]     = 120;
-  configDoc["maxRuntimeSec"]       = 300;
-  configDoc["maxProductionLiters"] = 50.0;
+  configDoc["tdsLimit"]            = DEF_TDS_LIMIT;
+  configDoc["maxFlushTimeSec"]     = DEF_MAX_FLUSH_TIME_SEC;
 
-  // ===== System
-  configDoc["autoStart"]           = false;
-  configDoc["mqttHost"]            = "192.168.68.57";
-  configDoc["mqttPort"]            = 1883;
-  configDoc["mDNSName"]            = "osmose";
+  configDoc["maxRuntimeAutoSec"]   = DEF_MAX_RUNTIME_AUTO_SEC;
+  configDoc["maxRuntimeManualSec"] = DEF_MAX_RUNTIME_MANUAL_SEC;
+
+  configDoc["maxProductionAutoLiters"]   = DEF_MAX_PROD_AUTO_L;
+  configDoc["maxProductionManualLiters"] = DEF_MAX_PROD_MANUAL_L;
+
+  configDoc["autoStart"] = DEF_AUTOSTART;
+  configDoc["mqttPort"]  = DEF_MQTT_PORT;
+  configDoc["mDNSName"]  = DEF_MDNS_NAME;
+  configDoc["APPassWord"] = DEF_AP_PASSWORD;
+  configDoc["mqttHost"]  = DEF_MQTT_HOST;
+  configDoc["wifiSSID"] = DEF_WIFI_SSID;
+  configDoc["wifiPassword"] = DEF_WIFI_PASSWORD;
+
 
   configSave();
 }

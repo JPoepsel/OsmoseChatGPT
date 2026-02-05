@@ -152,12 +152,19 @@ canvas{
    SETTINGS PAGE
    ========================================================= */
 
-.settings{
-  display:flex;
-  flex-direction:column;
-  gap:14px;
+#settings label {
+  display: grid;
 
-  max-width:300px;
+  /* ⭐ mehr Platz für Text */
+  grid-template-columns: 240px 1fr;
+
+  align-items: center;
+  gap: 12px;
+
+  margin-bottom: 10px;
+
+  /* ⭐ etwas kleinere Schrift */
+  font-size: 13px;
 }
 
 .settings label{
@@ -167,19 +174,7 @@ canvas{
   color:var(--muted);
 }
 
-.settings input{
-  margin-top:6px;
 
-  padding:10px;
-
-  border:none;
-  border-radius:10px;
-
-  background:var(--card);
-  color:var(--text);
-
-  font-size:16px;
-}
 
 /* ===== Settings Layout ===== */
 
@@ -217,3 +212,123 @@ button:disabled{
 
 
 
+/* ===== Password eye inside field ===== */
+
+.pwWrap{
+  position:relative;
+  width:100%;
+}
+
+.pwWrap input{
+  padding-right:36px; /* Platz fürs Auge */
+}
+
+.pwEye{
+  position:absolute;
+  right:6px;
+  top:50%;
+  transform:translateY(-50%);
+
+  width:28px;
+  height:28px;
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:#2a2a2a;      /* ⭐ eigener Kontrast */
+  border-radius:8px;
+
+  font-size:16px;
+  color:#ffffff;
+
+  cursor:pointer;
+  user-select:none;
+}
+
+.pwEye:hover{
+  background:var(--accent);
+}
+
+.pwWrap input{
+  padding-right:42px;   
+}
+
+/* ===== inputs + selects identisch ===== */
+
+#settings input,
+#settings select {
+  width: 100%;
+  box-sizing: border-box;
+
+  padding: 6px 10px;
+
+  border: none;
+  border-radius: 10px;
+
+  background: var(--card);
+  color: var(--text);
+
+  font-size: 16px;
+
+  appearance: none;      /* ⭐ wichtig: Browser Default Look AUS */
+  -webkit-appearance: none;
+}
+
+
+/* nur für WLAN Zeile 3 Spalten */
+#settings .wifiRow{
+  grid-template-columns: 180px 1fr auto;
+}
+/* ===== WLAN Select exakt wie Input ===== */
+
+#settings select {
+  appearance: none;
+
+  width: 100%;
+  box-sizing: border-box;
+
+  padding: 6px 8px;
+
+  border: none;
+  border-radius: 10px;
+
+  background: var(--card);
+  color: var(--text);
+
+  font-size: 16px;
+}
+
+/* 3-Spalten Layout nur für WLAN */
+#wifiSSID {
+  height: 34px;
+}
+/* ===== WiFi scan result list ===== */
+
+.wifiResults{
+  margin-top:10px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.wifiItem{
+  display:grid;
+  grid-template-columns: 1fr auto auto;
+  gap:8px;
+  align-items:center;
+
+  background:var(--card);
+  padding:6px 10px;
+  border-radius:10px;
+  font-size:14px;
+}
+
+.wifiItem button{
+  padding:4px 10px;
+  font-size:13px;
+}
+
+.wifiResults{
+  margin: 10px 0 12px 0;   /* oben + unten Abstand wie andere Felder */
+}

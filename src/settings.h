@@ -8,14 +8,18 @@ struct Settings
 
   float tdsLimit;
   float maxFlushTimeSec;
-  float maxRuntimeSec;
-  float maxProductionLiters;
+  float maxRuntimeAutoSec;
+  float maxRuntimeManualSec;
+  float maxProductionAutoLiters;
+  float maxProductionManualLiters;
 
   bool  autoStart;
   String apPassword;
   String mqttHost;
   uint16_t mqttPort;
   String mDNSName;
+  String wifiSSID;
+  String wifiPassword;
 };
 
 extern Settings settings;

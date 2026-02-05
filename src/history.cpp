@@ -21,6 +21,8 @@ static float prodBuf[MAX_SAMPLES_24H];
 
 static uint16_t idx = 0;
 static uint32_t lastSampleMs = 0;
+static float lastProducedLiters = 0.0f;   // ⭐ neu für Flow-Berechnung
+
 
 
 /* ============================================================
@@ -113,14 +115,20 @@ void historyInit()
    SERIES SAMPLES
    ============================================================ */
 
-void historyAddSample(float tds, float flow, float produced)
+void historyAddSample(float tds, float produced)
 {
   if(millis() - lastSampleMs < SAMPLE_INTERVAL_MS) return;
 
   lastSampleMs = millis();
 
+  /* ⭐ echter Flow in L/min */
+  float delta = produced - lastProducedLiters;
+  float flowLpm = delta * 2.0f;   // 30s sample → *2
+
+  lastProducedLiters = produced;
+
   tdsBuf[idx]  = tds;
-  flowBuf[idx] = flow;
+  flowBuf[idx] = flowLpm;   // ⭐ jetzt korrekt
   prodBuf[idx] = produced;
 
   idx = (idx+1) % MAX_SAMPLES_24H;

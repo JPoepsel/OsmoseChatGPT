@@ -13,7 +13,7 @@ void historySetUpdateCallback(HistoryUpdateCallback cb);
 
 void historyInit();
 
-void historyAddSample(float tds, float flow, float produced);
+void historyAddSample(float tds, float produced);
 
 void historyStartProduction();
 void historyEndProduction(const char* reason);
