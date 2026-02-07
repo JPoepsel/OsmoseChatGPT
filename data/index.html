@@ -133,8 +133,17 @@
   </label>
 
   <br><br>
-  <button onclick="saveSettings()">Save</button>
-  <button onclick="saveAndReboot()">Save & Reboot</button>
+  <div class="settingsButtons">
+    <div>
+      <button onclick="saveSettings()">Save</button>
+      <button onclick="saveAndReboot()">Save & Reboot</button>
+    </div>
+
+    <button class="save"
+            onclick="location.href='/update'">
+      Firmware update…
+    </button>
+  </div>
 
 </div>
 

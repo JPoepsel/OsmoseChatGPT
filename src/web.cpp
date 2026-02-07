@@ -6,6 +6,8 @@
 #include <ArduinoJson.h>
 #include <vector>
 #include <algorithm>
+#include <Update.h>
+
 
 #include "history.h"
 #include "config_settings.h"
@@ -79,6 +81,46 @@ static void onWsEvent(AsyncWebSocket*, AsyncWebSocketClient*,
   if(m=="stop")  webStopRequest=true;
 }
 
+const char* page = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="25;url=/" />
+<style>
+body{
+  background:#121212;
+  color:#eee;
+  font-family:system-ui;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:100vh;
+}
+.card{
+  background:#1c1c1c;
+  padding:30px;
+  border-radius:14px;
+  text-align:center;
+}
+</style>
+</head>
+<body>
+<div class="card">
+<h2>Update erfolgreich ✓</h2>
+<p>Gerät startet neu…</p>
+<p>Reload in <span id="c">25</span>s</p>
+</div>
+
+<script>
+let s=25;
+setInterval(()=>{
+  document.getElementById("c").innerText=--s;
+},1000);
+</script>
+</body>
+</html>
+)rawliteral";
 
 /* ============================================================ */
 void webInit()
@@ -117,6 +159,43 @@ void webInit()
     addNoCache(r);
     request->send(r);
   });
+
+/* ================= OTA UPDATE ================= */
+
+server.on("/update", HTTP_POST,
+[](AsyncWebServerRequest *request){
+
+    request->send(200,"text/html",page);
+
+    // ⭐ reboot async verzögert
+    xTaskCreate([](void*){
+        delay(800);
+        ESP.restart();
+    }, "reboot", 2048, NULL, 1, NULL);
+
+},
+[](AsyncWebServerRequest *request, String filename, size_t index,
+   uint8_t *data, size_t len, bool final)
+{
+    bool spiffs = request->hasParam("spiffs");
+
+    if(!index)
+    {
+        if(spiffs)
+            Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS);
+        else
+            Update.begin(UPDATE_SIZE_UNKNOWN);
+    }
+
+    Update.write(data, len);
+
+    if(final)
+        Update.end(true);
+});
+
+server.on("/update", HTTP_GET, [](AsyncWebServerRequest *request){
+  request->send(SPIFFS, "/update.html", "text/html");
+});
 
 
  /* ================= WIFI SCAN (async, WDT-safe) ================= */
@@ -212,15 +291,20 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
     req->send(200, "application/json", historyGetSeriesJson(range));
   });
 
-/* REBOOT */
-server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *req){
-  req->send(200,"text/plain","rebooting");
-  delay(200);
-  ESP.restart();
-});
+  /* REBOOT */
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *req){
+    req->send(200,"text/plain","rebooting");
+    delay(200);
+    ESP.restart();
+  });
 
   server.on("/api/history/table", HTTP_GET, [](AsyncWebServerRequest *req){
     req->send(200, "application/json", historyGetTableJson());
+  });
+
+  /* ⭐⭐⭐ Captive Portal Fallback */
+  server.onNotFound([](AsyncWebServerRequest *request){
+    request->redirect("/");
   });
 
   server.begin();

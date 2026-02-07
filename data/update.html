@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Firmware Update – Osmose Controller</title>
+
+<link rel="stylesheet" href="/style.css">
+</head>
+
+
+<body>
+
+<nav>
+  <button onclick="location.href='/'">← Back</button>
+</nav>
+
+
+<section>
+
+<h3>⚙ Firmware / Filesystem Update</h3>
+
+<div id="settings">
+
+  <!-- ========= Firmware ========= -->
+  <h3>Firmware (.bin)</h3>
+
+  <form id="fwForm" action="/update" method="POST" enctype="multipart/form-data">
+    <label>
+      Datei
+      <input type="file" name="update" accept=".bin" required>
+    </label>
+
+    <button class="save">Upload Firmware</button>
+  </form>
+
+
+  <!-- ========= SPIFFS ========= -->
+  <h3 style="margin-top:24px;">Filesystem / SPIFFS (.bin)</h3>
+
+  <form id="fsForm" action="/update?spiffs=1" method="POST" enctype="multipart/form-data">
+    <label>
+      Datei
+      <input type="file" name="update" accept=".bin" required>
+    </label>
+
+    <button class="save">Upload Filesystem</button>
+  </form>
+
+
+  <!-- ========= Status ========= -->
+  <div id="status" style="margin-top:22px;color:var(--muted);font-size:14px;"></div>
+
+</div>
+
+</section>
+
+
+
+<script>
+const statusBox = document.getElementById("status");
+
+
+function handleSubmit(form)
+{
+  form.onsubmit = () =>
+  {
+    statusBox.innerText = "Uploading… please wait";
+
+    let sec = 25;   // genug für SPIFFS + reboot
+
+    const timer = setInterval(() =>
+    {
+      statusBox.innerText =
+        `Rebooting… reconnect in ${sec}s`;
+
+      sec--;
+
+      if(sec < 0)
+      {
+        clearInterval(timer);
+        location.href = "/";
+      }
+    }, 1000);
+  };
+}
+
+
+handleSubmit(document.getElementById("fwForm"));
+handleSubmit(document.getElementById("fsForm"));
+</script>
+
+
+</body>
+</html>

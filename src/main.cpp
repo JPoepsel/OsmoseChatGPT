@@ -15,6 +15,10 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include <SPIFFS.h>
+#include <DNSServer.h>
+#include <Update.h>
+
+
 #include "web.h"
 #include "config_settings.h"
 #include "history.h"
@@ -47,6 +51,9 @@
 
 // ================= WIFI =================
 const char* AP_SSID="osmose";
+DNSServer dnsServer;
+const byte DNS_PORT = 53;
+
 
 bool wifiConnected=false;
 
@@ -353,13 +360,17 @@ void startWifi(){
     DBG_INFO("[WiFi] STA OK\n");
 
   }else{
-
     DBG_INFO("[WiFi] AP MODE\n");
 
     WiFi.mode(WIFI_AP);
     WiFi.softAP(AP_SSID, settings.apPassword.c_str());
 
+    IPAddress apIP = WiFi.softAPIP();
+
+    /* ⭐⭐⭐ Captive DNS: alles -> ESP */
+    dnsServer.start(DNS_PORT, "*", apIP);
   }
+
 }
 
 
@@ -510,6 +521,7 @@ void setup(){
 // Loop (ORIGINAL + ADD checks)
 // ============================================================
 void loop(){
+  dnsServer.processNextRequest();
 
   mqttReconnect();
   mqtt.loop();

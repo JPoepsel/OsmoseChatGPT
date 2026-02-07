@@ -1,10 +1,11 @@
 /* =========================================================
-   OSMOSE CONTROLLER – STYLE
+   OSMOSE CONTROLLER – STYLE (CLEANED)
    modern dark responsive
    ========================================================= */
 
 :root{
-  --bg:#121212;
+  --bg:#121212; 
+  /* --bg:#ff00ff; */
   --card:#1c1c1c;
   --accent:#3a86ff;
   --green:#2ecc71;
@@ -23,10 +24,8 @@
 body{
   margin:0;
   padding:18px;
-
   background:var(--bg);
   color:var(--text);
-
   font-family:
     system-ui,
     -apple-system,
@@ -57,39 +56,26 @@ nav button{
 
 button{
   padding:12px 18px;
-
   border:none;
   border-radius:var(--radius);
-
   background:var(--accent);
   color:white;
-
   font-size:16px;
   font-weight:600;
-
   cursor:pointer;
   transition:0.15s;
 }
 
-button:hover{
-  filter:brightness(1.1);
-}
+button:hover{ filter:brightness(1.1); }
+button:active{ transform:scale(0.97); }
 
-button:active{
-  transform:scale(0.97);
-}
+.start{ background:var(--green); }
+.stop{  background:var(--red); }
+.save{  background:var(--orange); margin-top:10px; }
 
-.start{
-  background:var(--green);
-}
-
-.stop{
-  background:var(--red);
-}
-
-.save{
-  background:var(--orange);
-  margin-top:10px;
+button:disabled{
+  opacity:0.45;
+  cursor:not-allowed;
 }
 
 
@@ -101,9 +87,7 @@ button:active{
   display:grid;
   grid-template-columns:1fr 1fr;
   gap:14px;
-
   margin:18px 0 22px 0;
-
   font-size:20px;
 }
 
@@ -152,67 +136,58 @@ canvas{
    SETTINGS PAGE
    ========================================================= */
 
-#settings label {
-  display: grid;
-
-  /* ⭐ mehr Platz für Text */
-  grid-template-columns: 240px 1fr;
-
-  align-items: center;
-  gap: 12px;
-
-  margin-bottom: 10px;
-
-  /* ⭐ etwas kleinere Schrift */
-  font-size: 13px;
+#settings{
+  max-width:520px;
+  margin:0 auto;
+  padding:10px 16px;
 }
 
-.settings label{
-  display:flex;
-  flex-direction:column;
-  font-size:14px;
-  color:var(--muted);
+/* alle Labels = Grid Layout */
+#settings label{
+  display:grid;
+  grid-template-columns:180px 1fr;
+  align-items:center;
+  gap:12px;
+  margin-bottom:12px;
+  font-size:13px;
 }
 
-
-
-/* ===== Settings Layout ===== */
-
-#settings {
-  max-width: 520px;      /* <<< begrenzt Breite auf Desktop */
-  margin: 0 auto;       /* zentriert */
-  padding: 10px 16px;   /* Innenabstand links/rechts */
+/* inputs + selects identisch */
+#settings input,
+#settings select{
+  width:100%;
+  box-sizing:border-box;
+  padding:6px 10px;
+  border:none;
+  border-radius:10px;
+  background:var(--card);
+  color:var(--text);
+  font-size:16px;
+  appearance:none;
+  -webkit-appearance:none;
 }
 
-#settings label {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  align-items: center;
-  gap: 12px;
-
-  margin-bottom: 12px;
-}
-
-#settings input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;     /* fühlt sich wertiger an */
-}
-
-/* Checkbox sauber links */
-#settings input[type="checkbox"] {
-  width: auto;
-  justify-self: start;
-}
-
-button:disabled{
-  opacity: 0.45;
-  cursor: not-allowed;
+/* checkbox sauber links */
+#settings input[type="checkbox"]{
+  width:auto;
+  justify-self:start;
 }
 
 
+/* =========================================================
+   WIFI ROW (3 Spalten: Label | Input | Button)
+   ========================================================= */
 
-/* ===== Password eye inside field ===== */
+#wifiSSID{ height:34px; }
+
+#settings .wifiRow{
+  grid-template-columns:180px 1fr auto;
+}
+
+
+/* =========================================================
+   PASSWORD EYE
+   ========================================================= */
 
 .pwWrap{
   position:relative;
@@ -220,7 +195,7 @@ button:disabled{
 }
 
 .pwWrap input{
-  padding-right:36px; /* Platz fürs Auge */
+  padding-right:42px;
 }
 
 .pwEye{
@@ -228,20 +203,15 @@ button:disabled{
   right:6px;
   top:50%;
   transform:translateY(-50%);
-
   width:28px;
   height:28px;
-
   display:flex;
   align-items:center;
   justify-content:center;
-
-  background:#2a2a2a;      /* ⭐ eigener Kontrast */
+  background:#2a2a2a;
   border-radius:8px;
-
   font-size:16px;
   color:#ffffff;
-
   cursor:pointer;
   user-select:none;
 }
@@ -250,63 +220,13 @@ button:disabled{
   background:var(--accent);
 }
 
-.pwWrap input{
-  padding-right:42px;   
-}
 
-/* ===== inputs + selects identisch ===== */
-
-#settings input,
-#settings select {
-  width: 100%;
-  box-sizing: border-box;
-
-  padding: 6px 10px;
-
-  border: none;
-  border-radius: 10px;
-
-  background: var(--card);
-  color: var(--text);
-
-  font-size: 16px;
-
-  appearance: none;      /* ⭐ wichtig: Browser Default Look AUS */
-  -webkit-appearance: none;
-}
-
-
-/* nur für WLAN Zeile 3 Spalten */
-#settings .wifiRow{
-  grid-template-columns: 180px 1fr auto;
-}
-/* ===== WLAN Select exakt wie Input ===== */
-
-#settings select {
-  appearance: none;
-
-  width: 100%;
-  box-sizing: border-box;
-
-  padding: 6px 8px;
-
-  border: none;
-  border-radius: 10px;
-
-  background: var(--card);
-  color: var(--text);
-
-  font-size: 16px;
-}
-
-/* 3-Spalten Layout nur für WLAN */
-#wifiSSID {
-  height: 34px;
-}
-/* ===== WiFi scan result list ===== */
+/* =========================================================
+   WIFI SCAN RESULT LIST
+   ========================================================= */
 
 .wifiResults{
-  margin-top:10px;
+  margin:10px 0 12px 0;
   display:flex;
   flex-direction:column;
   gap:6px;
@@ -314,10 +234,9 @@ button:disabled{
 
 .wifiItem{
   display:grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns:1fr auto auto;
   gap:8px;
   align-items:center;
-
   background:var(--card);
   padding:6px 10px;
   border-radius:10px;
@@ -329,6 +248,19 @@ button:disabled{
   font-size:13px;
 }
 
-.wifiResults{
-  margin: 10px 0 12px 0;   /* oben + unten Abstand wie andere Felder */
+
+/* =========================================================
+   SETTINGS BOTTOM BUTTONS
+   ========================================================= */
+
+.settingsButtons{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:26px;
+}
+
+.settingsButtons > div{
+  display:flex;
+  gap:10px;
 }
