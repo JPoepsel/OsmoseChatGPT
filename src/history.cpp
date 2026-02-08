@@ -234,3 +234,18 @@ String historyGetTableJson()
   serializeJson(doc,s);
   return s;
 }
+
+/* ============================================================
+   CLEAR PRODUCTION TABLE ONLY
+   ============================================================ */
+void historyClearProduction()
+{
+  rowCount = 0;
+  currentRow = -1;
+
+  memset(rows, 0, sizeof(rows));
+
+  // Datei leeren (persistent)
+  File f = SPIFFS.open(FILE_NAME, "w");
+  if(f) f.close();
+}

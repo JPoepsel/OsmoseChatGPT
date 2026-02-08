@@ -94,11 +94,7 @@ static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzli
 
 
 // ================= PARAMETER =================
-#define PREPARE_TIME_MS  10000
-#define FLUSH_TIMEOUT_MS 12000
-#define TDS_LIMIT        50
 #define TDS_MAX_ALLOWED  120
-#define MAX_LITERS       50
 #define HISTORY_SEC      3600
 #define MAX_AFTERFLOW_TIME 0.5f   // Sekunden
 
@@ -110,11 +106,15 @@ static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzli
 static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
 
-enum State{IDLE,PREPARE,FLUSH,PRODUCTION,INFO,ERROR};
+enum State{
+  IDLE,PREPARE,AUTOFLUSH,PRODUCTION,POSTFLUSH,SERVICEFLUSH,INFO,ERROR
+};
 // ============================================================
 // StateMachine (ORIGINAL + hooks ADD)
 // ============================================================
-const char* sName[]={"IDLE","PREPARE","FLUSH","PRODUCTION","INFO","ERROR"};
+const char* sName[]={
+  "IDLE","PREPARE","AUTOFLUSH","PRODUCTION","POSTFLUSH","SERVICEFLUSH","INFO","ERROR"
+};
 
 State state=IDLE,lastState=IDLE;
 uint32_t stateStart=0;
@@ -127,6 +127,9 @@ uint32_t prodStartCnt=0;
 volatile uint32_t cntIn=0,cntOut=0;
 void IRAM_ATTR isrIn(){cntIn++;}
 void IRAM_ATTR isrOut(){cntOut++;}
+
+uint32_t lastServiceFlushMs = 0;
+
 
 
 // ============================================================
@@ -346,6 +349,13 @@ void startWifi(){
   while(WiFi.status()!=WL_CONNECTED && millis()-t<10000) { DBG_INFO("."); delay(200); }
 
   if(WiFi.status()==WL_CONNECTED){
+  Serial.printf(
+    "\n[WIFI]\nIP=%s\nGW=%s\nDNS=%s\nHOST=http://%s.local\n\n",
+    WiFi.localIP().toString().c_str(),
+    WiFi.gatewayIP().toString().c_str(),
+    WiFi.dnsIP().toString().c_str(),
+    settings.mDNSName.c_str()
+  );
 
     wifiConnected=true;
     MDNS.begin(settings.mDNSName.c_str());
@@ -387,7 +397,7 @@ void updateLEDs(State s){
 
   bool sp=false;
   if(s==PREPARE) sp=blinkFast();
-  else if(s==FLUSH) sp=blinkSlow();
+  else if(s==AUTOFLUSH || s==POSTFLUSH) sp=blinkSlow();
   setOut(LedSpuelen,sp);
 
   if(s==ERROR)
@@ -409,9 +419,12 @@ void setState(State s)
 
   DBG_INFO("[STATE] %s -> %s\n", sName[state], sName[s]);
 
+  /* Nutzung setzt Service-Timer zurück */
+  if(s == PRODUCTION || s == PREPARE)
+    lastServiceFlushMs = millis();
+
   /* ========= START Produktion ========= */
-  if(state == FLUSH && s == PRODUCTION)
-  {
+  if((state == AUTOFLUSH || state == PREPARE) && s == PRODUCTION) {
     productionStartMs = millis();
     prodStart(0, cntIn, cntOut);
     historyStartProduction();
@@ -433,6 +446,7 @@ void setState(State s)
 
       prodEnd(cntIn, cntOut);
       historyEndProduction(reasonBuf);
+      webNotifyHistoryUpdate(); 
       cntIn  = 0;
       cntOut = 0;
     }
@@ -508,7 +522,6 @@ void setup(){
 
   allOff();
 
-  configEnsureExists();
   configLoad();
   settingsLoad();   // ⭐ zuerst laden
 
@@ -525,12 +538,6 @@ void loop(){
 
   mqttReconnect();
   mqtt.loop();
-
-  static bool firstBoot=true;
-  if(firstBoot && settings.autoStart){
-    firstBoot=false;
-    setState(PREPARE);
-  }
 
   int raw=analogRead(PIN_TDS_ADC);
   float tds=rawToTds(raw);
@@ -610,109 +617,241 @@ void loop(){
   }
 
 
-
+  if(settings.serviceFlushEnabled &&
+     settings.serviceFlushIntervalSec > 0 &&
+     state != PRODUCTION &&
+     state != PREPARE &&
+     state != AUTOFLUSH &&
+     state != POSTFLUSH &&
+     state != SERVICEFLUSH &&
+     state != ERROR )
+  {
+    if(millis() - lastServiceFlushMs >
+       settings.serviceFlushIntervalSec * 1000)
+    {
+      setState(SERVICEFLUSH);
+    }
+  }
   // ===== StateMachine =====
   if(!off){
-
+  
     switch(state) {
-
+  
+      /* ===================================================== */
       case IDLE: {
+        setOut(Relay,false);
+        setOut(WIn,false);
+        setOut(OOut,false);
+        setOut(OtoS,false);
+
         bool autoMode   = inActive(PIN_SAUTO);
         bool manualMode = inActive(PIN_SMANU);
-
-        // ⭐ echter Auto-Start (nur wenn nicht blockiert)
-        if(autoMode && !manualMode && !autoBlocked) 
-          setState(PREPARE);
-  
+        
+        bool lowSwim  = inActive(PIN_WLOW);   // schwimmt = true
+        bool highSwim = inActive(PIN_WHIGH);  // schwimmt = true
+        
+        /* ========= AUTO START nur wenn beide NICHT schwimmen ========= */
+        if(autoMode && !manualMode && !autoBlocked)
+        {
+          if(!lowSwim && !highSwim)   // ⭐ trocken unten
+            setState(PREPARE);
+        }
+        
+        break;
       }
-      break;
-      case PREPARE:
+  
+      /* ===================================================== */
+      case PREPARE: {
+        // Nur Wasser an, noch kein Produkt
         setOut(Relay,true);
         setOut(WIn,true);
-        if(millis()-stateStart>PREPARE_TIME_MS)
-          setState(FLUSH);
+        setOut(OOut,false);
+        setOut(OtoS,false);
+  
+        if(millis()-stateStart > settings.prepareTimeSec * 1000) {
+          if(settings.autoFlushEnabled)
+            setState(AUTOFLUSH);
+          else
+            setState(PRODUCTION);
+        }
         break;
+      }
 
-      case FLUSH:
+  
+      /* ===================================================== */
+      case AUTOFLUSH: {
+        // Spülen zur S/S (Drain), kein Produkt
+        setOut(Relay,true);
+        setOut(WIn,true);
+        setOut(OOut,false);
         setOut(OtoS,true);
-
+  
         if (tds < settings.tdsLimit) {
-          setOut(OtoS,false);
-          prodStartCnt=cntOut;
+          prodStartCnt = cntOut;
           setState(PRODUCTION);
         }
-
-       if(millis() - stateStart > settings.maxFlushTimeSec * 1000)
+  
+        if(millis() - stateStart > settings.maxFlushTimeSec * 1000)
           enterError("Flush timeout");
         break;
-
+      }
+  
+      /* ===================================================== */
       case PRODUCTION: {
+        
+        setOut(Relay,true);
+        setOut(WIn,true);
         setOut(OOut,true);
-  
-        if(tds > TDS_MAX_ALLOWED)
+        setOut(OtoS,false);
+      
+        bool autoMode   = inActive(PIN_SAUTO);
+        bool manualMode = inActive(PIN_SMANU);
+      
+        bool lowSwim  = inActive(PIN_WLOW);
+        bool highSwim = inActive(PIN_WHIGH);
+      
+      
+        /* =========================================================
+           AUTO STOP → Tank voll
+           ========================================================= */
+        if(autoMode && !manualMode)
+        {
+          if(lowSwim && highSwim)   // beide schwimmen = voll
+          {
+            enterInfo("Container full");
+      
+            if(settings.postFlushEnabled)
+              setState(POSTFLUSH);
+            else
+              setState(IDLE);
+      
+            break;
+          }
+        }
+      
+      
+        /* =========================================================
+           TDS Sicherheitslimit
+           ========================================================= */
+        if(tds > settings.tdsMaxAllowed)
+        {
           enterError("TDS too high");
-  
-        float produced = liters(cntOut - prodStartCnt);
-        prodAdd(produced - producedLiters);
-
-        bool isManualMode = inActive(PIN_SMANU);
-        bool lowSwitch    = inActive(PIN_WLOW);
-
-        if(prodCheckLimit(isManualMode)){
-          setState(IDLE);
           break;
         }
-
-        bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
-        bool switchOffToOn = (!lastSwitchState && switchNow);
-        lastSwitchState = switchNow;
-
-        prodHandleResets(lowSwitch, switchOffToOn);
-
-        /* =====================================================
-            MODE DEPENDENT LIMITS (AUTO vs MANUAL) ⭐ ADD
-            ===================================================== */
-
+      
+      
+        /* =========================================================
+           Produktions-Tracking
+           ========================================================= */
+        float produced = liters(cntOut - prodStartCnt);
+        prodAdd(produced - producedLiters);
+      
+        bool isManualMode = manualMode;
+        bool lowSwitch    = lowSwim;
+      
+      
+        /* =========================================================
+           Produktionslimit (Liter)
+           ========================================================= */
         float maxProd = isManualMode ?
-          settings.maxProductionManualLiters :
-          settings.maxProductionAutoLiters;
-
-        float maxRun = isManualMode ?
-          settings.maxRuntimeManualSec :
-          settings.maxRuntimeAutoSec;
-
-
-        /* ===== Production limit ===== */
-        if(maxProd > 0 && produced > maxProd) {
-
+            settings.maxProductionManualLiters :
+            settings.maxProductionAutoLiters;
+      
+        if(maxProd > 0 && produced > maxProd)
+        {
           if(isManualMode)
             enterInfo("Volume limit");
           else {
             autoBlocked = true;
             enterError("Volume limit");
           }
+      
+          if(settings.postFlushEnabled)
+            setState(POSTFLUSH);
+          else
+            setState(IDLE);
+      
+          break;
         }
-
-
-        /* ===== Runtime limit ===== */
-        if(maxRun > 0 && (millis() - stateStart) > maxRun * 1000) {
-
+      
+      
+        /* =========================================================
+           Runtime Limit (Zeit)
+           ========================================================= */
+        float maxRun = isManualMode ?
+            settings.maxRuntimeManualSec :
+            settings.maxRuntimeAutoSec;
+      
+        if(maxRun > 0 && (millis() - stateStart) > maxRun * 1000)
+        {
           if(isManualMode)
             enterInfo("Max runtime reached");
           else {
             autoBlocked = true;
             enterError("Max runtime reached");
           }
+      
+          if(settings.postFlushEnabled)
+            setState(POSTFLUSH);
+          else
+            setState(IDLE);
+      
+          break;
         }
-
-
+      
+      
+        /* =========================================================
+           Reset-Logik (deine Originalfunktion)
+           ========================================================= */
+        bool switchNow = digitalRead(PIN_SMANU) || digitalRead(PIN_SAUTO);
+        bool switchOffToOn = (!lastSwitchState && switchNow);
+        lastSwitchState = switchNow;
+      
+        prodHandleResets(lowSwitch, switchOffToOn);
+      
+        break;
+      }      
+      
+        
+        
+      /* ===================================================== */
+      case POSTFLUSH: {
+        // Nachspülen → nur Drain
+        setOut(Relay,true);
+        setOut(WIn,true);
+        setOut(OOut,false);
+        setOut(OtoS,true);
+      
+        if(millis() - stateStart > settings.postFlushTimeSec * 1000){
+          setState(IDLE);
+        }
         break;
       }
+      
+      case SERVICEFLUSH: {
+
+        /* nur Spülventil */
+        setOut(Relay,true);   // Anlage aktiv
+        setOut(WIn,true);     // Wasser rein
+        setOut(OtoS,true);    // Spülweg
+        setOut(OOut,false);   // KEIN Produktwasser
+     
+        if(millis() - stateStart >
+            settings.serviceFlushTimeSec * 1000)
+        {
+          setOut(OtoS,false);
+          lastServiceFlushMs = millis();
+          setState(IDLE);
+        }
+      
+        break;
+      }
+
+      /* ===================================================== */
       case ERROR:
-        allOff();
-      break;
       case INFO:
-       allOff();
+        // Nur hier komplett aus!
+        allOff();
       break;
     }
   }

@@ -13,10 +13,14 @@
 
 <body>
 
+  <header class="topBanner">
+    <img src="/Banner.png" alt="Osmose Logo">
+  </header>
+
 <nav>
-  <button onclick="show('home')">Home</button>
-  <button onclick="show('hist')">History</button>
-  <button onclick="show('set')">Settings</button>
+  <button type="button" onclick="show('home')">Home</button>
+  <button type="button" onclick="show('hist')">History</button>
+  <button type="button" onclick="show('set')">Settings</button>
 </nav>
 
 
@@ -38,8 +42,8 @@
 
 </div>
 
-<button id="btnStart" class="start" onclick="startCmd()">Start</button>
-<button id="btnStop"  class="stop"  onclick="stopCmd()">Stop</button>
+<button type="button" id="btnStart" class="start" onclick="startCmd()">Start</button>
+<button type="button" id="btnStop"  class="stop"  onclick="stopCmd()">Stop</button>
 
 </section>
 
@@ -61,19 +65,23 @@
 
 <div id="lastValues" style="margin-top:10px;font-size:14px;"></div>
 
-<h3 style="margin-top:20px;">Bezüge</h3>
-
-<table id="histTable" border="1" cellspacing="0" cellpadding="4">
-  <thead>
-    <tr>
-      <th>Start</th>
-      <th>Stop</th>
-      <th>Liter</th>
-      <th>Grund</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
+<div class="histBlock">
+  <div class="historyHeader">
+    <h2>Bezüge</h2>
+    <button class="dangerBtn" onclick="clearHistory()">Clear</button>
+  </div>
+  <table id="histTable" border="1" cellspacing="0" cellpadding="4">
+    <thead>
+      <tr>
+        <th>Start</th>
+        <th>Stop</th>
+        <th>Liter</th>
+        <th>Grund</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 
 </section>
 
@@ -89,58 +97,175 @@
 <div id="settings">
 
   <h3>Flow Calibration</h3>
-  <label>Pulses/Liter IN <input id="pulsesPerLiterIn" type="number" step="0.1"></label>
-  <label>Pulses/Liter OUT <input id="pulsesPerLiterOut" type="number" step="0.1"></label>
+
+  <label class="hint">
+    Pulses/Liter IN
+    <input id="pulsesPerLiterIn" type="number" step="0.1">
+    <span class="hintText">Impulse des Eingangssensors pro Liter für Durchflussmessung.</span>
+  </label>
+
+  <label class="hint">
+    Pulses/Liter OUT
+    <input id="pulsesPerLiterOut" type="number" step="0.1">
+    <span class="hintText">Impulse des Produktsensors pro Liter für Produktionsberechnung.</span>
+  </label>
+
+
 
   <h3>Process</h3>
-  <label>TDS Limit <input id="tdsLimit" type="number"></label>
-  <label>Max. Flush Time (s) <input id="maxFlushTimeSec" type="number"></label>
-  <label>Max Runtime AUTO (s)<input id="maxRuntimeAutoSec" type="number"></label>
-  <label>Max Runtime MANUAL (s) <input id="maxRuntimeManualSec" type="number"></label>
-  <label>Max Production AUTO (L) <input id="maxProductionAutoLiters" type="number" step="0.1"></label>
-  <label>Max Production MANUAL (L) <input id="maxProductionManualLiters" type="number" step="0.1"></label>
+
+  <label class="hint">
+    TDS Flush Limit
+    <input id="tdsLimit" type="number">
+    <span class="hintText">Unterhalb dieses TDS-Wertes endet die Spülung und Produktion startet.</span>
+  </label>
+
+  <label class="hint">
+    Max. Flush Time (s)
+    <input id="maxFlushTimeSec" type="number">
+    <span class="hintText">Maximale Spüldauer. Schutz vor endlosem Spülen.</span>
+  </label>
+
+  <label class="hint">
+    Max Runtime AUTO (s)
+    <input id="maxRuntimeAutoSec" type="number">
+    <span class="hintText">Zeitlimit für den Bezug pro automatischem Durchlauf.</span>
+  </label>
+
+  <label class="hint">
+    Max Runtime MANUAL (s)
+    <input id="maxRuntimeManualSec" type="number">
+    <span class="hintText">Zeitlimit für den Bezug im manuellen Betrieb.</span>
+  </label>
+
+  <label class="hint">
+    Max Production AUTO (L)
+    <input id="maxProductionAutoLiters" type="number" step="0.1">
+    <span class="hintText">Maximale Liter pro automatischem Zyklus.</span>
+  </label>
+
+  <label class="hint">
+    Max Production MANUAL (L)
+    <input id="maxProductionManualLiters" type="number" step="0.1">
+    <span class="hintText">Maximale Liter im manuellen Betrieb.</span>
+  </label>
+
+  <label class="hint">
+    Max TDS (ppm) during production
+    <input id="tdsMaxAllowed" type="number" step="0.1">
+    <span class="hintText">Überschreitung dieses TDS-Wertes stoppt sofort mit Fehler.</span>
+  </label>
+
+  <label class="hint">
+    Prepare Time (s)
+    <input id="prepareTimeSec" type="number" step="0.1">
+    <span class="hintText">Vorlaufzeit vor Spülen/Produktion (Druckaufbau).</span>
+  </label>
+
+  <label class="hint">
+    Auto Flush
+    <input id="autoFlushEnabled" type="checkbox">
+    <span class="hintText">Automatisches Vorspülen vor jedem Start, bis TDS klein genug.</span>
+  </label>
+
+  <label class="hint">
+    Post Flush
+    <input id="postFlushEnabled" type="checkbox">
+    <span class="hintText">Nachspülen der Osmoseanlage nach Produktionsende erlauben.</span>
+  </label>
+
+  <label class="hint">
+    Post Flush Time (s)
+    <input id="postFlushTimeSec" type="number" step="0.1">
+    <span class="hintText">Maximale Dauer für die Nachspülung der Osmose-Anlage.</span>
+  </label>
+
+
+
+  <h3>Service Flush</h3>
+
+  <label class="hint">
+    Enable
+    <input id="serviceFlushEnabled" type="checkbox">
+    <span class="hintText">Regelmäßige Spülung auch ohne Nutzung.</span>
+  </label>
+
+  <label class="hint">
+    Interval (h)
+    <input id="serviceFlushIntervalSec" type="number" step="0.1">
+    <span class="hintText">Zeit zwischen Service-Spülungen in Stunden.</span>
+  </label>
+
+  <label class="hint">
+    Flush Time (s)
+    <input id="serviceFlushTimeSec" type="number">
+    <span class="hintText">Komplett-Dauer einer Service-Spülung inkl. Einschalten und ggf. selbständiger Sülung der Osmose-Anlage.</span>
+  </label>
+
+
 
   <h3>System</h3>
-  <label><input id="autoStart" type="checkbox"> Auto Start</label>
-  <label>MQTT Host <input id="mqttHost"></label>
-  <label>MQTT Port <input id="mqttPort" type="number"></label>
-  <label>mDNS Name <input id="mDNSName"></label>
- 
- <label class="wifiRow">
+
+  <label class="hint">
+    MQTT Host
+    <input id="mqttHost">
+    <span class="hintText">Adresse des MQTT-Servers (z.B. 192.168.x.x oder myraspi.local).</span>
+  </label>
+
+  <label class="hint">
+    MQTT Port
+    <input id="mqttPort" type="number">
+    <span class="hintText">Standard ist 1883.</span>
+  </label>
+
+  <label class="hint">
+    mDNS Name
+    <input id="mDNSName">
+    <span class="hintText">Hostname im Netzwerk, z.B. osmose. .local wird automatisch angehängt!</span>
+  </label>
+
+
+
+  <label class="wifiRow hint">
     WiFi SSID
     <input id="wifiSSID" autocomplete="off">
     <button type="button" onclick="scanWifi()">Scan</button>
+    <span class="hintText">WLAN-Netzwerk, mit dem sich das Gerät verbindet.</span>
   </label>
 
   <div id="wifiResults" class="wifiResults" hidden></div>
 
 
-  <label>
+
+  <label class="hint">
     WiFi Password
     <div class="pwWrap">
       <input id="wifiPassword" type="password">
       <span class="pwEye" onclick="togglePw('wifiPassword')">👁</span>
     </div>
+    <span class="hintText">Passwort für das WLAN.</span>
   </label>
 
-
-  <label>
+  <label class="hint">
     AP Password
     <div class="pwWrap">
       <input id="APPassWord" type="password">
       <span class="pwEye" onclick="togglePw('APPassWord')">👁</span>
     </div>
+    <span class="hintText">Passwort des Notfall-Access-Points. Mindestens 8 Zeichen oder leer für ungeschützt.</span>
   </label>
 
+
+
   <br><br>
+
   <div class="settingsButtons">
     <div>
-      <button onclick="saveSettings()">Save</button>
-      <button onclick="saveAndReboot()">Save & Reboot</button>
+      <button type="button" onclick="saveSettings()">Save</button>
+      <button type="button" onclick="saveAndReboot()">Save & Reboot</button>
     </div>
 
-    <button class="save"
-            onclick="location.href='/update'">
+    <button type="button" class="save" onclick="location.href='/update'">
       Firmware update…
     </button>
   </div>

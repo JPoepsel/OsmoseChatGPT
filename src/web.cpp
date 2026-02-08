@@ -34,6 +34,10 @@ static void onHistoryUpdate()
   ws.textAll("{\"histUpdate\":1}");
 }
 
+void webNotifyHistoryUpdate()
+{
+  ws.textAll("{\"histUpdate\":1}");
+}
 
 /* ============================================================ */
 static void addNoCache(AsyncWebServerResponse *r)
@@ -125,40 +129,66 @@ setInterval(()=>{
 /* ============================================================ */
 void webInit()
 {
+  /* alle statischen Dateien */
+  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
   historySetUpdateCallback(onHistoryUpdate);
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    auto r=request->beginResponse(SPIFFS,"/index.html","text/html");
-    addNoCache(r);
-    request->send(r);
-  });
-
-  server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
-    auto r=request->beginResponse(SPIFFS,"/app.js","application/javascript");
-    addNoCache(r);
-    request->send(r);
-  });
-
-  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
-    auto r=request->beginResponse(SPIFFS,"/style.css","text/css");
-    addNoCache(r);
-    request->send(r);
-  });
-
-
   /* SETTINGS GET */
   server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest *request){
 
-    String json;
-    serializeJson(configDoc,json);
+  JsonDocument doc;
 
-    auto r=request->beginResponse(200,"application/json",json);
-    addNoCache(r);
-    request->send(r);
-  });
+  doc["pulsesPerLiterIn"]  = settings.pulsesPerLiterIn;
+  doc["pulsesPerLiterOut"] = settings.pulsesPerLiterOut;
+
+  doc["tdsLimit"]        = settings.tdsLimit;
+  doc["maxFlushTimeSec"] = settings.maxFlushTimeSec;
+  doc["tdsMaxAllowed"]   = settings.tdsMaxAllowed; 
+
+  doc["maxRuntimeAutoSec"]   = settings.maxRuntimeAutoSec;
+  doc["maxRuntimeManualSec"] = settings.maxRuntimeManualSec;
+
+  doc["maxProductionAutoLiters"]   = settings.maxProductionAutoLiters;
+  doc["maxProductionManualLiters"] = settings.maxProductionManualLiters;
+
+  doc["prepareTimeSec"]   = settings.prepareTimeSec;
+  doc["autoFlushEnabled"] = settings.autoFlushEnabled;
+  doc["postFlushEnabled"] = settings.postFlushEnabled;
+  doc["postFlushTimeSec"] = settings.postFlushTimeSec;
+
+  doc["serviceFlushEnabled"]     = settings.serviceFlushEnabled;
+  doc["serviceFlushIntervalSec"] = settings.serviceFlushIntervalSec;
+  doc["serviceFlushTimeSec"]     = settings.serviceFlushTimeSec;
+
+  doc["mqttHost"] = settings.mqttHost;
+  doc["mqttPort"] = settings.mqttPort;
+  doc["mDNSName"] = settings.mDNSName;
+  doc["APPassWord"] = settings.apPassword;
+  doc["wifiSSID"] = settings.wifiSSID;
+  doc["wifiPassword"] = settings.wifiPassword;
+
+  String json;
+  serializeJson(doc,json);
+
+  auto r=request->beginResponse(200,"application/json",json);
+  addNoCache(r);
+  request->send(r);
+});
+
+
+
+/* ===== CLEAR PRODUCTION TABLE ONLY ===== */
+server.on("/api/history/clearProd", HTTP_POST, [](AsyncWebServerRequest *req){
+
+  historyClearProduction();   // ⭐ neue Funktion
+  req->send(200,"text/plain","OK");
+
+  onHistoryUpdate();          // sofort WS refresh
+});
 
 /* ================= OTA UPDATE ================= */
 
@@ -273,11 +303,11 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
       if(deserializeJson(doc,data))
         return request->send(400,"text/plain","Bad JSON");
 
-     for (JsonPair kv : doc.as<JsonObject>())
-       configDoc[kv.key()] = kv.value();
+      for (JsonPair kv : doc.as<JsonObject>())
+        configDoc[kv.key()] = kv.value();
 
-      configSave();
-      settingsLoad();
+      settingsLoad();   // config -> settings
+      settingsSave();   // settings -> komplette config neu schreiben
 
       request->send(200,"text/plain","OK");
     });
@@ -296,6 +326,18 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
     req->send(200,"text/plain","rebooting");
     delay(200);
     ESP.restart();
+  });
+
+  server.on("/ls", HTTP_GET, [](AsyncWebServerRequest *req){
+    File root = SPIFFS.open("/");
+    String out;
+    File f = root.openNextFile();
+    while(f){
+      out += f.name();
+      out += "\n";
+      f = root.openNextFile();
+    }
+    req->send(200,"text/plain",out);
   });
 
   server.on("/api/history/table", HTTP_GET, [](AsyncWebServerRequest *req){

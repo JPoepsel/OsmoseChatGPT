@@ -17,6 +17,8 @@ void historyAddSample(float tds, float produced);
 
 void historyStartProduction();
 void historyEndProduction(const char* reason);
+void historyClearProduction();
+
 
 String historyGetSeriesJson(uint32_t seconds);
 String historyGetTableJson();

@@ -1,59 +1,107 @@
-#include "config_defaults.h"
 #include "settings.h"
 #include "config_settings.h"
 
 Settings settings;
 
-#define CFG(key, def) (configDoc[key] | (def))
+
+/* ============================================================
+   GENERIC LOADERS
+   ============================================================ */
+
+template<typename T>
+static void loadIfExists(const char* key, T& target)
+{
+  if(!configDoc[key].isNull())
+    target = configDoc[key].as<T>();
+}
+
+/* overload für String */
+static void loadIfExists(const char* key, String& target)
+{
+  if(!configDoc[key].isNull())
+    target = String((const char*)configDoc[key]);
+}
+
+
+/* ============================================================
+   LOAD
+   ============================================================ */
 
 void settingsLoad()
 {
-  // ===== Flow calibration =====
-  settings.pulsesPerLiterIn  = CFG("pulsesPerLiterIn",  DEF_PULSES_PER_LITER_IN);
-  settings.pulsesPerLiterOut = CFG("pulsesPerLiterOut", DEF_PULSES_PER_LITER_OUT);
+  /* Flow */
+  loadIfExists("pulsesPerLiterIn",  settings.pulsesPerLiterIn);
+  loadIfExists("pulsesPerLiterOut", settings.pulsesPerLiterOut);
+
+  /* Process */
+  loadIfExists("tdsLimit",        settings.tdsLimit);
+  loadIfExists("maxFlushTimeSec", settings.maxFlushTimeSec);
+  loadIfExists("tdsMaxAllowed", settings.tdsMaxAllowed);
 
 
-  // ===== Process =====
-  settings.tdsLimit        = CFG("tdsLimit",        DEF_TDS_LIMIT);
-  settings.maxFlushTimeSec = CFG("maxFlushTimeSec", DEF_MAX_FLUSH_TIME_SEC);
+  loadIfExists("maxRuntimeAutoSec",   settings.maxRuntimeAutoSec);
+  loadIfExists("maxRuntimeManualSec", settings.maxRuntimeManualSec);
 
-  settings.maxRuntimeAutoSec     = CFG("maxRuntimeAutoSec",     DEF_MAX_RUNTIME_AUTO_SEC);
-  settings.maxRuntimeManualSec   = CFG("maxRuntimeManualSec",   DEF_MAX_RUNTIME_MANUAL_SEC);
+  loadIfExists("maxProductionAutoLiters",   settings.maxProductionAutoLiters);
+  loadIfExists("maxProductionManualLiters", settings.maxProductionManualLiters);
 
-  settings.maxProductionAutoLiters   = CFG("maxProductionAutoLiters",   DEF_MAX_PROD_AUTO_L);
-  settings.maxProductionManualLiters = CFG("maxProductionManualLiters", DEF_MAX_PROD_MANUAL_L);
+  loadIfExists("prepareTimeSec",    settings.prepareTimeSec);
+  loadIfExists("autoFlushEnabled",  settings.autoFlushEnabled);
+  loadIfExists("postFlushEnabled",  settings.postFlushEnabled);
+  loadIfExists("postFlushTimeSec",  settings.postFlushTimeSec);
 
+  loadIfExists("serviceFlushEnabled",     settings.serviceFlushEnabled);
+  loadIfExists("serviceFlushIntervalSec", settings.serviceFlushIntervalSec);
+  loadIfExists("serviceFlushTimeSec",     settings.serviceFlushTimeSec);
 
-  // ===== System =====
-  settings.autoStart = CFG("autoStart", DEF_AUTOSTART);
+  /* System */
+  
+  loadIfExists("mqttHost", settings.mqttHost);
+  loadIfExists("mqttPort", settings.mqttPort);
+  loadIfExists("mDNSName", settings.mDNSName);
+  loadIfExists("APPassWord", settings.apPassword);
 
-  settings.mqttHost   = String(CFG("mqttHost", DEF_MQTT_HOST));
-  settings.mqttPort   = CFG("mqttPort", DEF_MQTT_PORT);
-  settings.mDNSName   = String(CFG("mDNSName", DEF_MDNS_NAME));
-  settings.apPassword = String(CFG("APPassWord", DEF_AP_PASSWORD));
-  settings.wifiSSID     = String(CFG("wifiSSID", DEF_WIFI_SSID));
-  settings.wifiPassword = String(CFG("wifiPassword", DEF_WIFI_PASSWORD));
+  loadIfExists("wifiSSID",     settings.wifiSSID);
+  loadIfExists("wifiPassword", settings.wifiPassword);
 }
+
+
+/* ============================================================
+   SAVE (write everything back)
+   ============================================================ */
 
 void settingsSave()
 {
+  /* Flow */
   configDoc["pulsesPerLiterIn"]  = settings.pulsesPerLiterIn;
   configDoc["pulsesPerLiterOut"] = settings.pulsesPerLiterOut;
 
-  configDoc["tdsLimit"] = settings.tdsLimit;
+  /* Process */
+  configDoc["tdsLimit"]        = settings.tdsLimit;
   configDoc["maxFlushTimeSec"] = settings.maxFlushTimeSec;
-  configDoc["maxRuntimeAutoSec"]     = settings.maxRuntimeAutoSec;
-  configDoc["maxRuntimeManualSec"]   = settings.maxRuntimeManualSec;
+  configDoc["tdsMaxAllowed"] = settings.tdsMaxAllowed;
+
+  configDoc["maxRuntimeAutoSec"]   = settings.maxRuntimeAutoSec;
+  configDoc["maxRuntimeManualSec"] = settings.maxRuntimeManualSec;
 
   configDoc["maxProductionAutoLiters"]   = settings.maxProductionAutoLiters;
   configDoc["maxProductionManualLiters"] = settings.maxProductionManualLiters;
 
-  configDoc["autoStart"] = settings.autoStart;
+  configDoc["prepareTimeSec"]   = settings.prepareTimeSec;
+  configDoc["autoFlushEnabled"] = settings.autoFlushEnabled;
+  configDoc["postFlushEnabled"] = settings.postFlushEnabled;
+  configDoc["postFlushTimeSec"] = settings.postFlushTimeSec;
 
+  configDoc["serviceFlushEnabled"]     = settings.serviceFlushEnabled;
+  configDoc["serviceFlushIntervalSec"] = settings.serviceFlushIntervalSec;
+  configDoc["serviceFlushTimeSec"]     = settings.serviceFlushTimeSec;
+
+  /* System */
   configDoc["mqttHost"] = settings.mqttHost;
   configDoc["mqttPort"] = settings.mqttPort;
   configDoc["mDNSName"] = settings.mDNSName;
   configDoc["APPassWord"] = settings.apPassword;
+
   configDoc["wifiSSID"]     = settings.wifiSSID;
   configDoc["wifiPassword"] = settings.wifiPassword;
 

@@ -7,4 +7,4 @@ extern JsonDocument configDoc;
 
 bool configLoad();
 bool configSave();
-bool configEnsureExists();
+

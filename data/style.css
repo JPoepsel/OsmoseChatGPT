@@ -33,6 +33,24 @@ body{
     Roboto,
     sans-serif;
 }
+/* =========================================================
+   TOP BANNER / LOGO
+   ========================================================= */
+
+.topBanner{
+  width:100%;
+  margin-bottom:14px;
+  display:flex;
+  justify-content:center;
+}
+
+.topBanner img{
+  width:100%;
+  max-width:520px;   /* gleiche Breite wie Settings */
+  height:auto;
+  border-radius:14px;
+  display:block;
+}
 
 
 /* =========================================================
@@ -71,7 +89,7 @@ button:active{ transform:scale(0.97); }
 
 .start{ background:var(--green); }
 .stop{  background:var(--red); }
-.save{  background:var(--orange); margin-top:10px; }
+.save{  background:var(--orange); }
 
 button:disabled{
   opacity:0.45;
@@ -167,9 +185,13 @@ canvas{
   -webkit-appearance:none;
 }
 
-/* checkbox sauber links */
 #settings input[type="checkbox"]{
   width:auto;
+  appearance:auto;
+  -webkit-appearance:checkbox;
+  background:none;
+  padding:0;
+  border:none;
   justify-self:start;
 }
 
@@ -255,12 +277,80 @@ canvas{
 
 .settingsButtons{
   display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-top:26px;
+  gap:10px;
+  margin-top:20px;  
 }
 
 .settingsButtons > div{
   display:flex;
   gap:10px;
+}
+
+.settingsButtons button:last-child{
+  margin-left:auto;
+}
+
+
+.histBlock{
+  width:100%;
+  max-width:900px;   /* oder deine Tabellenbreite */
+  margin:auto;
+}
+
+.historyHeader{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:6px;
+}
+
+#histTable{
+  width:100%;
+  border-collapse:collapse;
+}
+
+.dangerBtn{
+  background:#2a2a2a;
+  color:#eee;
+  border:1px solid #444;
+  padding:6px 12px;
+  border-radius:8px;
+  cursor:pointer;
+}
+
+.dangerBtn:hover{
+  background:#aa2222;
+}
+
+/* ================================
+   SETTINGS TOOLTIP HELP (FIXED)
+   ================================ */
+
+.hint{
+  position:relative;
+  display:inline-block;   /* ⭐ wichtig */
+  width:100%;
+}
+
+.hintText{
+  display:none;           /* ⭐ wichtig */
+  position:absolute;
+  left:0;
+  top:100%;
+  margin-top:6px;
+
+  background:#1e1e1e;
+  color:#fff;
+  padding:6px 10px;
+  border-radius:6px;
+  font-size:12px;
+  white-space:nowrap;
+
+  box-shadow:0 4px 12px rgba(0,0,0,.4);
+  z-index:100;
+}
+
+/* ⭐ nur bei Hover sichtbar */
+.hint:hover .hintText{
+  display:block;
 }

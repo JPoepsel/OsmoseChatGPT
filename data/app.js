@@ -55,6 +55,14 @@ function historyVisible()
   return el && !el.hidden;
 }
 
+function clearHistory()
+{
+  if(!confirm("Bezüge wirklich löschen?"))
+    return;
+
+  fetch("/api/history/clearProd", { method: "POST" })
+    .then(() => loadHistoryTable());   // Tabelle sofort neu laden
+}
 
 /* ============================================================
    TAB SWITCHING
@@ -168,53 +176,33 @@ function updateButtons(stateName)
 
 function saveSettings()
 {
-  const ids = [
-    "pulsesPerLiterIn",
-    "pulsesPerLiterOut",
-    "tdsLimit",
-    "maxFlushTimeSec",
-    "maxRuntimeAutoSec",
-    "maxRuntimeManualSec",
-    "maxProductionAutoLiters",
-    "maxProductionManualLiters",
-    "autoStart",
-    "mqttHost",
-    "mqttPort",
-    "mDNSName",
-    "APPassWord",
-    "wifiSSID",
-    "wifiPassword"
-  ];
-
   const data = {};
 
-  ids.forEach(id =>
-  {
-    const el = document.getElementById(id);
-    if(!el) return;
+  document.querySelectorAll("#settings input, #settings select")
+    .forEach(el =>
+    {
+      if(!el.id) return;
 
-    if(el.type === "checkbox")
-      data[id] = el.checked;
-    else if(el.type === "number")
-      data[id] = Number(el.value);
-    else
-      data[id] = el.value;
-  });
+      if(el.type === "checkbox")
+        data[el.id] = el.checked;
+      else if(el.type === "number") {
+        let v = Number(el.value);
+
+        // ⭐⭐ Stunden → Sekunden
+        if(el.id === "serviceFlushIntervalSec")
+          v = v * 3600.0;
+
+        data[el.id] = v;
+      } else
+        data[el.id] = el.value;
+    });
 
   fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   })
-  .then(() =>
-  {
-    if(data.mDNSName !== lastMdnsName)
-      toast("Settings gespeichert – Neustart erforderlich");
-    else
-      toast("Settings gespeichert");
-
-    lastMdnsName = data.mDNSName;
-  })
+  .then(() => toast("Settings gespeichert"))
   .catch(() => toast("Fehler beim Speichern"));
 }
 
@@ -230,15 +218,22 @@ function loadSettings()
     .then(cfg =>
     {
       Object.keys(cfg).forEach(k =>
-      {
-        const el = document.getElementById(k);
-        if(!el) return;
-
-        if(el.type === "checkbox")
-          el.checked = cfg[k];
-        else
-          el.value = cfg[k];
-      });
+        {
+          const el = document.getElementById(k);
+          if(!el) return;
+        
+          let v = cfg[k];
+        
+          // ⭐⭐ Sekunden → Stunden
+          if(k === "serviceFlushIntervalSec")
+            v = v / 3600.0;
+        
+          if(el.type === "checkbox")
+            el.checked = v;
+          else
+            el.value = v;
+        });
+        
 
       lastMdnsName = cfg.mDNSName || "";
    
