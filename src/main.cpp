@@ -333,16 +333,35 @@ void mqttReconnect(){
 }
 
 
-void mqttPublish(const char* s,float tds,float prod){
+void mqttPublish(const char* stateName,
+                 float tds,
+                 float litersNow,
+                 float flowLpm,
+                 uint32_t runtimeSec)
+{
   if(!mqtt.connected()) return;
-  char b[32];
-  mqtt.publish("osmose/state",s);
-  snprintf(b,32,"%.1f",tds);
-  mqtt.publish("osmose/tds_ppm",b);
-  snprintf(b,32,"%.2f",prod);
-  mqtt.publish("osmose/produced_liters",b);
-  DBG_INFO("[MQTT] publish %s tds=%.1f prod=%.2f\n",s,tds,prod);
+
+  char buf[32];
+
+  mqtt.publish("osmose/state", stateName);
+  mqtt.publish("osmose/mode",  currentModeStr());
+
+  snprintf(buf, sizeof(buf), "%.1f", tds);
+  mqtt.publish("osmose/tds", buf);
+
+  snprintf(buf, sizeof(buf), "%.2f", flowLpm);
+  mqtt.publish("osmose/flow", buf);
+
+  snprintf(buf, sizeof(buf), "%.2f", litersNow);
+  mqtt.publish("osmose/liters", buf);
+
+  snprintf(buf, sizeof(buf), "%lu", runtimeSec);
+  mqtt.publish("osmose/runtimeSec", buf);
+
+  mqtt.publish("osmose/msg", lastErrorMsg.c_str());
 }
+
+
 
 
 // ============================================================
@@ -907,10 +926,23 @@ lastAutoMode = autoModeNow;
 
   // ===== MQTT =====
   static uint32_t lastMQTT=0;
+  uint32_t runtimeSec = 0;
+  if(state == PRODUCTION)
+    runtimeSec = (millis() - productionStartMs) / 1000;char stateWithMode[32];
+
 
   if(state!=lastState || millis()-lastMQTT>10000){
+    static uint32_t lastCnt=0;
+    static uint32_t lastT=millis();
+    float flow=0;
 
-    mqttPublish(sName[state],tds,producedLitersSafe());
+    if(millis()-lastT>1000){
+      flow=(liters(cntOut-lastCnt))*60.0f;
+      lastCnt=cntOut;
+      lastT=millis();
+    }
+
+     mqttPublish(sName[state], tds,  producedLitersSafe(), flow, runtimeSec);
 
     lastState=state;
     lastMQTT=millis();
@@ -918,10 +950,7 @@ lastAutoMode = autoModeNow;
 
   updateLEDs(state);
   
-  uint32_t runtimeSec = 0;
-  if(state == PRODUCTION)
-    runtimeSec = (millis() - productionStartMs) / 1000;char stateWithMode[32];
-
+  
   bool manualActive = inActive(PIN_SMANU);
   webLoop(tds, sName[state], producedLitersSafe(), manualActive, runtimeSec, currentModeStr());
 
