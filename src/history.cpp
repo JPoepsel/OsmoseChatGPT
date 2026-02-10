@@ -34,6 +34,7 @@ struct Row{
   time_t endTs;
   float  liters;
   char   reason[20];
+  char   mode[10];     
 };
 
 static Row rows[MAX_ROWS];
@@ -142,7 +143,7 @@ void historyAddSample(float tds, float produced)
    START / END PRODUCTION
    ============================================================ */
 
-void historyStartProduction()
+void historyStartProduction(const char* mode)
 {
   currentRow = 0;
 
@@ -152,6 +153,9 @@ void historyStartProduction()
 
   rows[0] = {};
   rows[0].startTs = time(nullptr);
+
+  strncpy(rows[0].mode, mode, sizeof(rows[0].mode)-1);
+  rows[0].mode[sizeof(rows[0].mode)-1] = 0;
 
   if(rowCount < MAX_ROWS)
     rowCount++;
@@ -224,10 +228,19 @@ String historyGetTableJson()
   for(int i=0;i<rowCount;i++){
     JsonObject o = arr.add<JsonObject>();
 
+    o["mode"]   = rows[i].mode;
     o["start"]  = rows[i].startTs;
     o["end"]    = rows[i].endTs;
+
+    uint32_t dur = 0;
+    if(rows[i].startTs && rows[i].endTs)
+      dur = rows[i].endTs - rows[i].startTs;
+
+    o["duration"] = dur;
+
     o["liters"] = rows[i].liters;
     o["reason"] = rows[i].reason;
+
   }
 
   String s;

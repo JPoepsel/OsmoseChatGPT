@@ -51,6 +51,7 @@ static void addNoCache(AsyncWebServerResponse *r)
 /* ============================================================ */
 static void wsBroadcast(float tds,
                         const char* stateName,
+                        const char* modeName,   
                         float litersNow,
                         float flowLpm,
                         float litersLeft,
@@ -59,6 +60,7 @@ static void wsBroadcast(float tds,
   JsonDocument doc;
 
   doc["state"]=stateName;
+  doc["mode"]=modeName;
   doc["error"]=lastErrorMsg;
   doc["tds"]=tds;
   doc["liters"]=litersNow;
@@ -354,7 +356,7 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
 
 
 /* ============================================================ */
-void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode, uint32_t runtimeSec)
+void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode, uint32_t runtimeSec, const char* modeName)
 {
   static uint32_t lastCnt=0;
   static uint32_t lastT=millis();
@@ -385,7 +387,7 @@ void webLoop(float tds, const char* stateName, float litersNow, bool isManualMod
   }
 
   if(millis()-lastSend>300){
-    wsBroadcast(tds,stateName,litersNow,flow,left,runtimeLeft);
+    wsBroadcast(tds,stateName,modeName,litersNow,flow,left,runtimeLeft);
     lastSend=millis();
   }
 }

@@ -15,7 +15,7 @@ void historyInit();
 
 void historyAddSample(float tds, float produced);
 
-void historyStartProduction();
+void historyStartProduction(const char* mode);
 void historyEndProduction(const char* reason);
 void historyClearProduction();
 

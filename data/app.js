@@ -105,7 +105,9 @@ function connectWS()
 
     if(d.state !== undefined)
     {
-      state.innerText = d.error ? (d.state + " : " + d.error) : d.state;
+      const label = (d.mode ? (d.mode + " • ") : "") + d.state;
+      state.innerText = d.error ? (label + " : " + d.error) : label;
+
 
       updateButtons(d.state);
 
@@ -196,7 +198,11 @@ function saveSettings()
       } else
         data[el.id] = el.value;
     });
-
+  const ap = data["APPassWord"] || "";
+  if(ap.length !== 0 && ap.length < 8) {
+    toast("AP Passwort: nur leer oder ≥ 8 Zeichen erlaubt");
+    return;
+  }
   fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -351,14 +357,23 @@ function loadHistoryTable()
       rows.forEach(r =>
       {
         const tr = document.createElement("tr");
+      
         const fmt = t => t ? new Date(t*1000).toLocaleString() : "";
-
+      
+        const durFmt = s => {
+          const m = Math.floor(s/60);
+          const sec = s%60;
+          return `${m}m ${sec}s`;
+        };
+      
         tr.innerHTML =
-          `<td>${fmt(r.start)}</td>
+          `<td>${r.mode || ""}</td>
+           <td>${fmt(r.start)}</td>
            <td>${fmt(r.end)}</td>
+           <td>${durFmt(r.duration||0)}</td>
            <td>${Number(r.liters).toFixed(2)}</td>
            <td>${r.reason||""}</td>`;
-
+      
         body.appendChild(tr);
       });
     });
@@ -374,7 +389,7 @@ window.onload = () =>
   show("home");
   connectWS();
   loadSettings();
-};
+ };
 
 function scanWifi()
 {
@@ -456,3 +471,6 @@ function togglePw(id)
   else
     el.type = "password";
 }
+
+
+

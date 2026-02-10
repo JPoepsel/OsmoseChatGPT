@@ -5,7 +5,7 @@ extern bool webStartRequest;
 extern bool webStopRequest;
 
 void webInit();
-void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode, uint32_t runtimeSec);
+void webLoop(float tds, const char* state, float liters, bool manual, uint32_t runtime, const char* mode);
 void webNotifyHistoryUpdate();
 
 
