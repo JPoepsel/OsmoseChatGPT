@@ -72,14 +72,9 @@ const char* NTP_SERVER="pool.ntp.org";
 const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
 
-static float producedLiters = 0.0f;
-uint32_t productionStartMs = 0;   // ⭐ neu
+uint32_t productionStartMs = 0;  
 
-
-static bool productionLockedManual = false;
-static bool productionLockedAuto   = false;
-static bool lastLowSwitch = false;
-static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzlimit
+static bool autoBlocked = false;   // verhindert Auto-Neustart nach Schutzlimit
 
 
 // ================= PINMAP =================
@@ -96,14 +91,7 @@ static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzli
 
 
 // ================= PARAMETER =================
-#define TDS_MAX_ALLOWED  120
-#define HISTORY_SEC      3600
 #define MAX_AFTERFLOW_TIME 0.5f   // Sekunden
-
-
-#define PULSES_PER_LITER_IN   100
-#define PULSES_PER_LITER_OUT  100
-
 
 static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
@@ -162,46 +150,6 @@ float rawToTds(int raw){
 }
 
 
-void prodAdd(float d)
-{
-  producedLiters += d;
-}
-
-bool prodCheckLimit(bool isManualMode)
-{
-  float maxProd = isManualMode ?
-    settings.maxProductionManualLiters :
-    settings.maxProductionAutoLiters;
-
-  if(maxProd <= 0) return false;
-
-  if(producedLiters >= maxProd)
-  {
-    if(isManualMode)
-      productionLockedManual = true;
-    else
-      productionLockedAuto = true;
-
-    return true;
-  }
-
-  return false;
-}
-
-void prodHandleResets(bool lowSwitch, bool switchOffToOn)
-{
-  if(productionLockedAuto && lastLowSwitch && !lowSwitch){
-    producedLiters = 0;
-    productionLockedAuto = false;
-  }
-
-  if(productionLockedManual && switchOffToOn){
-    producedLiters = 0;
-    productionLockedManual = false;
-  }
-
-  lastLowSwitch = lowSwitch;
-}
 
 // ============================================================
 // Mode Helper (ADD)
@@ -214,67 +162,6 @@ const char* currentModeStr()
   if(manualMode) return "MANUAL";
   if(autoMode)   return "AUTO";
   return "OFF";
-}
-
-// ============================================================
-// ===== ADD: LAST VALUE BUFFER ================================
-#define LAST_BUF 128
-struct Sample{ uint16_t raw; float tds; };
-Sample lastBuf[LAST_BUF];
-uint16_t lastIdx=0;
-void lastAdd(uint16_t r,float t){
-  lastBuf[lastIdx]={r,t};
-  lastIdx=(lastIdx+1)%LAST_BUF;
-}
-
-
-// ============================================================
-// ===== ADD: Produktions-Historie =============================
-#define PROD_HISTORY_BUF 64
-struct ProdEntry{
-  time_t startTs,endTs;
-  float tMin,tMax,tSum;
-  uint32_t tCnt;
-  float lOut,lIn;
-};
-ProdEntry prodHist[PROD_HISTORY_BUF];
-uint16_t prodIdx=0;
-bool prodActive=false;
-uint32_t histIn0=0,histOut0=0;
-float totalOut=0,totalIn=0;
-
-time_t nowTs(){ time_t t; time(&t); return t; }
-
-void prodStart(float tds,uint32_t in,uint32_t out){
-  auto &e=prodHist[prodIdx];
-  e.startTs=nowTs();
-  e.endTs=0;
-  e.tMin=e.tMax=tds;
-  e.tSum=tds; e.tCnt=1;
-  histIn0=in; histOut0=out;
-  prodActive=true;
-}
-
-void prodUpdate(float tds,uint32_t in,uint32_t out){
-  if(!prodActive) return;
-  auto &e=prodHist[prodIdx];
-  if(tds<e.tMin) e.tMin=tds;
-  if(tds>e.tMax) e.tMax=tds;
-  e.tSum+=tds; e.tCnt++;
-  e.lOut=liters(out-histOut0);
-  e.lIn =litersIn(in-histIn0);
-}
-
-void prodEnd(uint32_t in,uint32_t out){
-  if(!prodActive) return;
-  auto &e=prodHist[prodIdx];
-  e.endTs=nowTs();
-  e.lOut=liters(out-histOut0);
-  e.lIn =litersIn(in-histIn0);
-  totalOut+=e.lOut;
-  totalIn +=e.lIn;
-  prodIdx=(prodIdx+1)%PROD_HISTORY_BUF;
-  prodActive=false;
 }
 
 
@@ -475,31 +362,29 @@ void setState(State s)
 
   /* ========= START Produktion ========= */
   if((state == AUTOFLUSH || state == PREPARE) && s == PRODUCTION) {
+    prodStartCnt = cntOut;
     productionStartMs = millis();
-    prodStart(0, cntIn, cntOut);
     historyStartProduction(currentModeStr());
   }
 
   /* ========= ENDE Produktion ========= */
-  if (prodActive) {
-    if(s != PRODUCTION)
-    {
-      char reasonBuf[20];
+  if (state == PRODUCTION && s != PRODUCTION) {
+    char reasonBuf[20];
 
-      if(lastErrorMsg.length())
-        strncpy(reasonBuf, lastErrorMsg.c_str(), sizeof(reasonBuf)-1);
-      else
-        strcpy(reasonBuf, "Stopped");
+    if(lastErrorMsg.length())
+      strncpy(reasonBuf, lastErrorMsg.c_str(), sizeof(reasonBuf)-1);
+    else
+      strcpy(reasonBuf, "Stopped");
 
-      reasonBuf[sizeof(reasonBuf)-1] = 0;
+    reasonBuf[sizeof(reasonBuf)-1] = 0;
 
-      prodEnd(cntIn, cntOut);
-      historyEndProduction(reasonBuf);
-      webNotifyHistoryUpdate(); 
-      cntIn  = 0;
-      cntOut = 0;
-    }
+    historyEndProduction(reasonBuf);
+    webNotifyHistoryUpdate();
+
+    cntIn  = 0;
+    cntOut = 0;
   }
+
 
   state = s;
   stateStart = millis();
@@ -531,9 +416,6 @@ void hardResetToIdle()
   cntOut = 0;
   prodStartCnt = 0;
   valveClosedTs = millis();
-
-  producedLiters = 0;
-  
   setState(IDLE);   // ✅ nur das!
 }
 
@@ -600,10 +482,11 @@ void loop(){
   
   bool autoModeNow = inActive(PIN_SAUTO);
   
-  if(!lastAutoMode && autoModeNow)   // OFF -> AUTO
-  {
+  if(!lastAutoMode && autoModeNow) {
     autoBlocked = false;
-    autoPauseBlink = false;  
+    autoPauseBlink = false;
+    lastErrorMsg = "";
+    if(state == IDLE) stateStart = millis();  // sauberer Reset
   }
 
   lastAutoMode = autoModeNow;
@@ -630,25 +513,15 @@ void loop(){
   }
 
   // ===== Manual switch start (0 -> MANU rising edge) =====
- 
   bool manualNow = inActive(PIN_SMANU);
-
   if(state == IDLE && manualNow && !lastSwitchState) {
     DBG_INFO("[START] manual switch\n");
     autoBlocked=false;   
     setState(PREPARE);
   }
 
-
-
   lastSwitchState = manualNow;
-
-
-  lastAdd(raw,tds);
-  prodUpdate(tds,cntIn,cntOut);
-
   historyAddSample(tds, producedLitersSafe());
-
 
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
 
@@ -657,16 +530,16 @@ void loop(){
 
   static uint32_t lastCntIn=0;
   if(!wInOn && cntIn!=lastCntIn) {
-    if(millis() - valveClosedTs > (uint32_t)(MAX_AFTERFLOW_TIME*1000)){
-      enterError("Flow while valve closed");
-    }
+ //   if(millis() - valveClosedTs > (uint32_t)(MAX_AFTERFLOW_TIME*1000)){
+ //     enterError("Flow while valve closed");
+ //   }
   }
   lastCntIn=cntIn;
 
-  if(cntIn > 50 && millis() - stateStart > 3000){
-    float ratio=(float)cntOut/(float)cntIn;
-    if(ratio<0.3f) enterError("Bad flow ratio");
-  }
+//  if(cntIn > 50 && millis() - stateStart > 3000){
+//    float ratio=(float)cntOut/(float)cntIn;
+//    if(ratio<0.3f) enterError("Bad flow ratio");
+//  }
 
   DBG_DBG("STATE=%s raw=%d tds=%.1f in=%lu out=%lu\n",
           sName[state],raw,tds,cntIn,cntOut);
@@ -677,13 +550,17 @@ void loop(){
 
     allOff();
 
-    // ⭐ HARD RESET der Messlogik
+    // Falls wir gerade produzieren → sauber beenden
+    if(state == PRODUCTION)
+        setState(IDLE);
+    else
+        state = IDLE;
+
+    // Jetzt erst Zähler zurücksetzen
     cntIn = 0;
     cntOut = 0;
     prodStartCnt = 0;
     valveClosedTs = millis();
-
-    setState(IDLE);
   }
 
 
@@ -822,9 +699,6 @@ void loop(){
         /* =========================================================
            Production tracking
            ========================================================= */
-        float produced = liters(cntOut - prodStartCnt);
-        prodAdd(produced - producedLiters);
-      
         bool isManualMode = manualMode;
       
       
@@ -837,7 +711,7 @@ void loop(){
             settings.maxProductionManualLiters :
             settings.maxProductionAutoLiters;
       
-        if(maxProd > 0 && produced > maxProd)
+        if(maxProd > 0 && producedLitersSafe() > maxProd)
         {
           if(isManualMode)
           {
@@ -923,7 +797,7 @@ void loop(){
           setOut(OtoS,false);
           lastServiceFlushMs = millis();
           if(lastErrorMsg.length())   // wenn Info aktiv war, diese nach dem Flush wiederherstellen
-            setState(INFO);
+            setState(INFO);           
           else
             setState(IDLE);
         }
