@@ -86,8 +86,8 @@ static bool autoBlocked = false;   // ⭐ verhindert Auto-Neustart nach Schutzli
 #define PIN_TDS_ADC     2
 #define PIN_WCOUNT_IN   3
 #define PIN_WCOUNT_OUT  4
-#define PIN_WLOW        5
-#define PIN_WHIGH       21
+#define PIN_WHIGH       5
+#define PIN_WLOW        21
 #define PIN_WERROR      20
 #define PIN_SAUTO       10
 #define PIN_SMANU       8
