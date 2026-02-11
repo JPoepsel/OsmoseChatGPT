@@ -310,35 +310,15 @@ void allOff(){
 
 
 // ============================================================
-// MQTT (ORIGINAL)
+// MQTT
 // ============================================================
-
-void mqttReconnect(){
-
-  if(!wifiConnected) return;
-  if(mqtt.connected()) return;
-
-  static uint32_t lastTry = 0;
-
-  if(millis() - lastTry < 5000) return;   // only every 5s
-  lastTry = millis();
-
-  DBG_INFO("[MQTT] try connect...");
-
-  if(mqtt.connect("osmose")){
-    DBG_INFO("[MQTT] connected");
-  }else{
-    DBG_ERR("[MQTT] failed rc=%d", mqtt.state());
-  }
-}
-
-
 void mqttPublish(const char* stateName,
                  float tds,
                  float litersNow,
                  float flowLpm,
                  uint32_t runtimeSec)
 {
+  if(settings.mqttHost.length() == 0) return;   
   if(!mqtt.connected()) return;
 
   char buf[32];
@@ -360,6 +340,28 @@ void mqttPublish(const char* stateName,
 
   mqtt.publish("osmose/msg", lastErrorMsg.c_str());
 }
+
+void mqttReconnect(float tds){
+  if(settings.mqttHost.length() == 0) return; 
+  if(!wifiConnected) return;
+  if(mqtt.connected()) return;
+
+  static uint32_t lastTry = 0;
+
+  if(millis() - lastTry < 5000) return;   // only every 5s
+  lastTry = millis();
+
+  DBG_INFO("[MQTT] try connect...");
+
+  if(mqtt.connect("osmose")){
+    DBG_INFO("[MQTT] connected");
+    mqttPublish(sName[state], tds, producedLitersSafe(), 0, 0);
+  }else{
+    DBG_ERR("[MQTT] failed rc=%d", mqtt.state());
+  }
+}
+
+
 
 
 
@@ -396,6 +398,9 @@ void startWifi(){
       settings.mqttHost.c_str(),
       settings.mqttPort
     );
+
+    if(settings.mqttHost.length() == 0)
+      DBG_INFO("[MQTT] disabled (no host)\n");
 
 
     configTime(GMT_OFFSET,DST_OFFSET,NTP_SERVER);
@@ -476,8 +481,7 @@ void setState(State s)
   }
 
   /* ========= ENDE Produktion ========= */
-  if(prodActive)   // ⭐⭐⭐ ENTSCHEIDEND! ⭐⭐⭐
-  {
+  if (prodActive) {
     if(s != PRODUCTION)
     {
       char reasonBuf[20];
@@ -500,7 +504,7 @@ void setState(State s)
   state = s;
   stateStart = millis();
 
-  if(s != ERROR && s != INFO)
+  if(s != ERROR && s != INFO && s != SERVICEFLUSH)
     lastErrorMsg = "";
 }
 
@@ -580,9 +584,14 @@ void setup(){
 // Loop (ORIGINAL + ADD checks)
 // ============================================================
 void loop(){
+
+  int raw=analogRead(PIN_TDS_ADC);
+  float tds=rawToTds(raw);
+ 
+
   dnsServer.processNextRequest();
 
-  mqttReconnect();
+  mqttReconnect(tds);
   mqtt.loop();
   // =====================================================
   // ⭐ GLOBAL Auto-Flankenerkennung (immer aktiv!)
@@ -597,10 +606,8 @@ void loop(){
     autoPauseBlink = false;  
   }
 
-lastAutoMode = autoModeNow;
+  lastAutoMode = autoModeNow;
 
-  int raw=analogRead(PIN_TDS_ADC);
-  float tds=rawToTds(raw);
   /* =========================================
      Web Start/Stop Requests
   ========================================= */
@@ -712,6 +719,15 @@ lastAutoMode = autoModeNow;
 
         bool lowSwim  = inActive(PIN_WLOW);   // schwimmt = true
         bool highSwim = inActive(PIN_WHIGH);  // schwimmt = true
+        /* =========================================
+           Schwimmer-Plausibilität (AUTO)
+           oben Wasser + unten trocken = unmöglich
+          ========================================= */
+        if (autoMode && highSwim && !lowSwim) {
+          enterError("Level sensor mismatch (upper only)");
+          break;
+        }
+
         
         /* ========= AUTO START nur wenn beide NICHT schwimmen ========= */
         if(autoMode && !manualMode && !autoBlocked)
@@ -903,12 +919,13 @@ lastAutoMode = autoModeNow;
         setOut(OtoS,true);    // Spülweg
         setOut(OOut,false);   // KEIN Produktwasser
      
-        if(millis() - stateStart >
-            settings.serviceFlushTimeSec * 1000)
-        {
+        if(millis() - stateStart > settings.serviceFlushTimeSec * 1000) {
           setOut(OtoS,false);
           lastServiceFlushMs = millis();
-          setState(IDLE);
+          if(lastErrorMsg.length())   // wenn Info aktiv war, diese nach dem Flush wiederherstellen
+            setState(INFO);
+          else
+            setState(IDLE);
         }
       
         break;
@@ -925,28 +942,51 @@ lastAutoMode = autoModeNow;
 
 
   // ===== MQTT =====
-  static uint32_t lastMQTT=0;
+  
+  static uint32_t lastMQTT = 0;
+  
   uint32_t runtimeSec = 0;
   if(state == PRODUCTION)
-    runtimeSec = (millis() - productionStartMs) / 1000;char stateWithMode[32];
-
-
-  if(state!=lastState || millis()-lastMQTT>10000){
-    static uint32_t lastCnt=0;
-    static uint32_t lastT=millis();
-    float flow=0;
-
-    if(millis()-lastT>1000){
-      flow=(liters(cntOut-lastCnt))*60.0f;
-      lastCnt=cntOut;
-      lastT=millis();
-    }
-
-     mqttPublish(sName[state], tds,  producedLitersSafe(), flow, runtimeSec);
-
-    lastState=state;
-    lastMQTT=millis();
+    runtimeSec = (millis() - productionStartMs) / 1000;
+  
+  
+  /* ---------- Flow-Berechnung (1s Mittelwert) ---------- */
+  static uint32_t lastCnt = 0;
+  static uint32_t lastT   = millis();
+  float flow = 0;
+  
+  if(millis() - lastT > 1000){
+    flow = (liters(cntOut - lastCnt)) * 60.0f;
+    lastCnt = cntOut;
+    lastT   = millis();
   }
+  
+  
+  /* ---------- SEND LOGIK ---------- */
+  
+  bool sendMQTTnow = false;
+  
+  /* State change */
+  if(state != lastState) sendMQTTnow = true;
+  
+    
+  /* Heartbeat */
+  if(millis() - lastMQTT > 10000) sendMQTTnow = true;
+  
+  
+  /* ---------- Publish ---------- */
+  
+  if(sendMQTTnow) {
+    mqttPublish(sName[state],
+                tds,
+                producedLitersSafe(),
+                flow,
+                runtimeSec);
+  
+    lastState = state;
+    lastMQTT  = millis();
+  }
+
 
   updateLEDs(state);
   

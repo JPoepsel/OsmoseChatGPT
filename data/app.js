@@ -175,8 +175,12 @@ function updateButtons(stateName)
 /* ============================================================
    SETTINGS SAVE
    ============================================================ */
+/* ============================================================
+   SETTINGS HELPER (NEU)
+   sammelt alle Werte einmal zentral
+   ============================================================ */
 
-function saveSettings()
+function collectSettingsData()
 {
   const data = {};
 
@@ -187,22 +191,27 @@ function saveSettings()
 
       if(el.type === "checkbox")
         data[el.id] = el.checked;
+
       else if(el.type === "number") {
         let v = Number(el.value);
 
-        // ⭐⭐ Stunden → Sekunden
+        // Stunden → Sekunden
         if(el.id === "serviceFlushIntervalSec")
-          v = v * 3600.0;
+          v *= 3600.0;
 
         data[el.id] = v;
-      } else
+      }
+      else
         data[el.id] = el.value;
     });
-  const ap = data["APPassWord"] || "";
-  if(ap.length !== 0 && ap.length < 8) {
-    toast("AP Passwort: nur leer oder ≥ 8 Zeichen erlaubt");
-    return;
-  }
+
+  return data;
+}
+
+function saveSettings()
+{
+  const data = collectSettingsData();
+
   fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -456,10 +465,18 @@ function scanWifi()
 
 function saveAndReboot()
 {
-  saveSettings();
+  const data = collectSettingsData();
 
-  fetch("/api/reboot", { method:"POST" })
-    .then(()=> toast("Reboot..."));
+  fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  })
+  .then(() => {
+    toast("Settings gespeichert – reboot…");
+    return fetch("/api/reboot", { method:"POST" });
+  })
+  .catch(() => toast("Speichern fehlgeschlagen"));
 }
 
 function togglePw(id)
