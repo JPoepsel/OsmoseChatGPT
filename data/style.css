@@ -359,3 +359,57 @@ canvas{
 .hint:hover .hintText{
   display:block;
 }
+
+
+.topBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#versionBox {
+  text-align: right;
+  font-size: 13px;
+  line-height: 1.3;
+  color: #aaa;
+  padding-right: 10px;
+}
+
+#versionBox div {
+  white-space: nowrap;
+}
+.topBanner {
+  position: relative;
+  padding: 10px 16px;
+  min-height: 80px;
+}
+
+/* Banner: wirklich mittig */
+.bannerImg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Version: rechts, oben bündig */
+.versionBox {
+  position: absolute;
+  top: 10px;          /* ⭐ bündig mit Bildoberkante */
+  right: 16px;
+
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* Mobile Fallback */
+@media (max-width: 700px) {
+  .versionBox {
+    position: static;
+    margin-top: 6px;
+    text-align: center;
+  }
+}

@@ -133,9 +133,6 @@ void historyAddSample(float tds, float produced)
   prodBuf[idx] = produced;
 
   idx = (idx+1) % MAX_SAMPLES_24H;
-
-  if(currentRow >= 0 && currentRow < MAX_ROWS)
-    rows[currentRow].liters = produced;
 }
 
 
@@ -163,14 +160,14 @@ void historyStartProduction(const char* mode)
   saveTable();
 }
 
-
-void historyEndProduction(const char* reason)
+void historyEndProduction(const char* reason, float finalLiters)
 {
   if(currentRow < 0) return;
 
   Row &r = rows[currentRow];
 
-  r.endTs = time(nullptr);
+  r.endTs  = time(nullptr);
+  r.liters = finalLiters;   
 
   if(!reason || !reason[0])
     reason = "Stopped";
@@ -179,7 +176,6 @@ void historyEndProduction(const char* reason)
   r.reason[sizeof(r.reason)-1] = 0;
 
   currentRow = -1;
-
   saveTable();
 }
 

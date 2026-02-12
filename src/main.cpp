@@ -4,6 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
+#define ESP_VERSION "ESP v3.0.7"
 
 #define DEBUG_LEVEL 2
 
@@ -17,6 +18,7 @@
 #include <SPIFFS.h>
 #include <DNSServer.h>
 #include <Update.h>
+#include <esp_ota_ops.h>
 
 
 #include "web.h"
@@ -75,6 +77,12 @@ const int  DST_OFFSET=3600;
 uint32_t productionStartMs = 0;  
 
 static bool autoBlocked = false;   // verhindert Auto-Neustart nach Schutzlimit
+static bool productionEnded = false;
+static char lastStopReason[20] = "";
+static float currentFlowLpm = 0.0f;
+static float lastProducedLiters = 0.0f;
+static bool litersFrozen = false;
+
 
 
 // ================= PINMAP =================
@@ -369,21 +377,9 @@ void setState(State s)
 
   /* ========= ENDE Produktion ========= */
   if (state == PRODUCTION && s != PRODUCTION) {
-    char reasonBuf[20];
-
-    if(lastErrorMsg.length())
-      strncpy(reasonBuf, lastErrorMsg.c_str(), sizeof(reasonBuf)-1);
-    else
-      strcpy(reasonBuf, "Stopped");
-
-    reasonBuf[sizeof(reasonBuf)-1] = 0;
-
-    historyEndProduction(reasonBuf);
-    webNotifyHistoryUpdate();
-
-    cntIn  = 0;
-    cntOut = 0;
+    productionEnded = true;   // nur merken!
   }
+
 
 
   state = s;
@@ -398,7 +394,9 @@ void setState(State s)
 
 void enterError(const char* m){
   DBG_ERR("[%s] !!! ERROR: %s !!!\n", currentModeStr(), m);
-  lastErrorMsg = m;          // ⭐ merken
+  lastErrorMsg = m;          
+  strncpy(lastStopReason, m, sizeof(lastStopReason)-1);
+  lastStopReason[sizeof(lastStopReason)-1] = 0;
   setState(ERROR);
 }
 
@@ -434,7 +432,10 @@ void setup(){
   historyInit();
 
 
-  DBG_INFO("BOOT 3.0\n");
+  DBG_INFO(ESP_VERSION); DBG_INFO("\n");
+  const esp_partition_t* p = esp_ota_get_running_partition();
+  Serial.printf("Running partition: %s\n", p->label);
+
 
   pinMode(PIN_WLOW,INPUT_PULLUP);
   pinMode(PIN_WHIGH,INPUT_PULLUP);
@@ -461,6 +462,18 @@ void setup(){
 
 }
 
+String buildStatusLine(float tds)
+{
+  char buf[80];
+
+  snprintf(buf, sizeof(buf),
+           "IN:%lu  OUT:%lu  TDS:%.1f",
+           cntIn,
+           cntOut,
+           tds);
+
+  return String(buf);
+}
 
 // ============================================================
 // Loop (ORIGINAL + ADD checks)
@@ -509,6 +522,7 @@ void loop(){
     webStopRequest=false;
     autoBlocked = true; 
     autoPauseBlink = true;
+    strcpy(lastStopReason, "User stop");
     hardResetToIdle();
   }
 
@@ -521,8 +535,11 @@ void loop(){
   }
 
   lastSwitchState = manualNow;
-  historyAddSample(tds, producedLitersSafe());
 
+  float histLiters =
+    (state == PRODUCTION) ? producedLitersSafe() : lastProducedLiters;
+  historyAddSample(tds, histLiters);
+  
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
 
   // ===== ADD: SAFETY =====
@@ -547,20 +564,14 @@ void loop(){
 
   // ===== OFF =====
   if(off){
-
     allOff();
 
-    // Falls wir gerade produzieren → sauber beenden
-    if(state == PRODUCTION)
-        setState(IDLE);
-    else
-        state = IDLE;
-
-    // Jetzt erst Zähler zurücksetzen
-    cntIn = 0;
-    cntOut = 0;
-    prodStartCnt = 0;
-    valveClosedTs = millis();
+    if(state == PRODUCTION){
+      strcpy(lastStopReason, "User stop");
+      setState(IDLE);
+    } else {
+      state = IDLE;
+    }
   }
 
 
@@ -586,10 +597,28 @@ void loop(){
   
       /* ===================================================== */
       case IDLE: {
+          if (productionEnded && !litersFrozen) {
+          // 500 ms nach Ventilschluss warten
+          if (millis() - valveClosedTs > 500) {
+            lastProducedLiters = producedLitersSafe();
+            litersFrozen = true;
+          }
+        }
+
+        // Produktion physikalisch abgeschlossen → History schreiben
+        if (productionEnded) {
+          productionEnded = false;
+
+          historyEndProduction(lastStopReason, lastProducedLiters);
+          webNotifyHistoryUpdate();
+          litersFrozen = false;
+        }
+
         setOut(Relay,false);
         setOut(WIn,false);
         setOut(OOut,false);
         setOut(OtoS,false);
+
 
         bool autoMode   = inActive(PIN_SAUTO);
         bool manualMode = inActive(PIN_SMANU);
@@ -675,7 +704,8 @@ void loop(){
           if(lowSwim && highSwim)
           {
             enterInfo("Container full");
-      
+            strcpy(lastStopReason, "Container full");
+
             if(settings.postFlushEnabled)
               setState(POSTFLUSH);
             else
@@ -713,9 +743,9 @@ void loop(){
       
         if(maxProd > 0 && producedLitersSafe() > maxProd)
         {
-          if(isManualMode)
-          {
-            // ⭐ normaler Abschluss
+          if(isManualMode)   {
+            strcpy(lastStopReason, "Volume limit");
+            // normaler Abschluss
             if(settings.postFlushEnabled)
               setState(POSTFLUSH);
             else
@@ -745,6 +775,7 @@ void loop(){
           if(isManualMode)
           {
             runtimeTimeoutActive = true;
+            strcpy(lastStopReason, "Max runtime reached");
      
             if(settings.postFlushEnabled)
               setState(POSTFLUSH);
@@ -826,16 +857,24 @@ void loop(){
   
   /* ---------- Flow-Berechnung (1s Mittelwert) ---------- */
   static uint32_t lastCnt = 0;
-  static uint32_t lastT   = millis();
-  float flow = 0;
-  
-  if(millis() - lastT > 1000){
-    flow = (liters(cntOut - lastCnt)) * 60.0f;
+  static uint32_t lastT   = 0;
+
+  uint32_t now = millis();
+  uint32_t dt  = now - lastT;
+
+  if(dt >= 3000) {   // 3s Fenster
+    uint32_t pulses = cntOut - lastCnt;
+    float dl = liters(pulses);
+
+    if(dl > 0)
+      currentFlowLpm = (dl / (dt / 1000.0f)) * 60.0f;
+    else
+      currentFlowLpm = 0.0f;
+
     lastCnt = cntOut;
-    lastT   = millis();
+    lastT   = now;
   }
-  
-  
+
   /* ---------- SEND LOGIK ---------- */
   
   bool sendMQTTnow = false;
@@ -847,25 +886,29 @@ void loop(){
   /* Heartbeat */
   if(millis() - lastMQTT > 10000) sendMQTTnow = true;
   
-  
+  float litersNow =
+    (state == PRODUCTION) ? producedLitersSafe() : lastProducedLiters;
+
   /* ---------- Publish ---------- */
   
   if(sendMQTTnow) {
     mqttPublish(sName[state],
                 tds,
-                producedLitersSafe(),
-                flow,
+                litersNow,
+                currentFlowLpm,
                 runtimeSec);
   
     lastState = state;
     lastMQTT  = millis();
   }
 
-
+  
   updateLEDs(state);
   
   
   bool manualActive = inActive(PIN_SMANU);
-  webLoop(tds, sName[state], producedLitersSafe(), manualActive, runtimeSec, currentModeStr());
+  String status = buildStatusLine(tds);
+  webSetStatus(status.c_str());   
+  webLoop(tds, sName[state], litersNow, manualActive, runtimeSec, currentModeStr(), currentFlowLpm, ESP_VERSION);
 
 }

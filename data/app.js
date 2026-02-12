@@ -1,3 +1,5 @@
+const SPIFF_VERSION = "WEB v3.0.0";
+
 /* ============================================================
    GLOBALS
    ============================================================ */
@@ -116,6 +118,10 @@ function connectWS()
 
       lastState = d.state;
     }
+    if(d.espVersion !== undefined) { 
+      const el = document.getElementById("espVersion"); 
+      if(el) el.innerText = d.espVersion;
+    }
 
     if(d.tds !== undefined)    tds.innerText    = Number(d.tds).toFixed(1);
     if(d.liters !== undefined) liters.innerText = Number(d.liters).toFixed(2);
@@ -126,6 +132,10 @@ function connectWS()
       const m = Math.floor(sec/60);
       const s = sec%60;
       timeLeft.innerText = `${m}m ${s}s`;
+    }
+    if(d.status !== undefined) {
+      const el = document.getElementById("statusLine");
+      if(el) el.innerText = d.status;
     }
 
   };
@@ -398,6 +408,7 @@ window.onload = () =>
   show("home");
   connectWS();
   loadSettings();
+  document.getElementById("spiffVersion").innerText = SPIFF_VERSION;
  };
 
 function scanWifi()

@@ -13,9 +13,14 @@
 
 <body>
 
-  <header class="topBanner">
-    <img src="/Banner.png" alt="Osmose Logo">
-  </header>
+<header class="topBanner">
+  <img src="/Banner.png" alt="Osmose Logo" class="bannerImg">
+
+  <div class="versionBox">
+    <div id="espVersion">ESP v?</div>
+    <div id="spiffVersion">SPIFFS v?</div>
+  </div>
+</header>
 
 <nav>
   <button type="button" onclick="show('home')">Home</button>
@@ -39,7 +44,13 @@
     <b id="left">0</b>
     <small id="timeLeft" style="display:block;font-size:14px;color:#aaa;">0m 0s</small>
   </div>
-
+</div>
+<div id="statusLine"
+     style="margin-top:10px;
+            font-size:14px;
+            color:#aaa;
+            font-family:monospace;">
+  –
 </div>
 
 <button type="button" id="btnStart" class="start" onclick="startCmd()">Start</button>

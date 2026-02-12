@@ -17,12 +17,17 @@ extern String lastErrorMsg;
 
 bool webStartRequest=false;
 bool webStopRequest=false;
+static String webStatusLine = "";
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 static uint32_t lastSend=0;
 
+void webSetStatus(const char* s)
+{
+  webStatusLine = s ? s : "";
+}
 
 /* ============================================================
    ⭐ HISTORY CALLBACK (NEU)
@@ -51,11 +56,13 @@ static void addNoCache(AsyncWebServerResponse *r)
 /* ============================================================ */
 static void wsBroadcast(float tds,
                         const char* stateName,
-                        const char* modeName,   
+                        const char* modeName,
                         float litersNow,
                         float flowLpm,
                         float litersLeft,
-                        float runtimeLeft)
+                        float runtimeLeft,
+                        const char* espVersion)   
+
 {
   JsonDocument doc;
 
@@ -67,6 +74,13 @@ static void wsBroadcast(float tds,
   doc["flow"]=flowLpm;
   doc["left"]=litersLeft;
   doc["timeLeft"] = runtimeLeft;
+  doc["espVersion"] = espVersion;
+
+  if(webStatusLine.length())
+    doc["status"] = webStatusLine;
+  else
+    doc["status"] = "Hä?"; 
+
 
   String s;
   serializeJson(doc,s);
@@ -172,7 +186,7 @@ void webInit()
   doc["APPassWord"] = settings.apPassword;
   doc["wifiSSID"] = settings.wifiSSID;
   doc["wifiPassword"] = settings.wifiPassword;
-
+  
   String json;
   serializeJson(doc,json);
 
@@ -356,19 +370,13 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
 
 
 /* ============================================================ */
-void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode, uint32_t runtimeSec, const char* modeName)
+void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode,
+             uint32_t runtimeSec, const char* modeName, float flowLpm, const char* espVersion)
 {
   static uint32_t lastCnt=0;
   static uint32_t lastT=millis();
 
-  float flow=0;
-
-  if(millis()-lastT>1000){
-    flow=(litersNow-lastCnt)*60.0;
-    lastCnt=litersNow;
-    lastT=millis();
-  }
-
+ 
   float limit = isManualMode ?
   settings.maxProductionManualLiters :
   settings.maxProductionAutoLiters;
@@ -387,7 +395,7 @@ void webLoop(float tds, const char* stateName, float litersNow, bool isManualMod
   }
 
   if(millis()-lastSend>300){
-    wsBroadcast(tds,stateName,modeName,litersNow,flow,left,runtimeLeft);
+    wsBroadcast(tds,stateName,modeName,litersNow,flowLpm,left,runtimeLeft,espVersion);
     lastSend=millis();
   }
 }
