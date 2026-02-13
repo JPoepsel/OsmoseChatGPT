@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.0.7"
+#define ESP_VERSION "ESP v3.0.11"
 
 #define DEBUG_LEVEL 2
 
@@ -81,7 +81,9 @@ static bool productionEnded = false;
 static char lastStopReason[20] = "";
 static float currentFlowLpm = 0.0f;
 static float lastProducedLiters = 0.0f;
-static bool litersFrozen = false;
+static uint32_t flowLastCnt = 0;
+static uint32_t flowLastT   = 0;
+
 
 
 
@@ -351,14 +353,17 @@ void updateLEDs(State s){
 
 
 
-
-
 void setState(State s)
 {
   if(state == s) return;
 
   DBG_INFO("[%s] [STATE] %s -> %s\n", currentModeStr(), sName[state], sName[s]);
   
+  //  Flow-Messung sauber zurücksetzen
+  flowLastCnt = cntOut;
+  flowLastT   = millis();
+  currentFlowLpm = 0.0f;
+
   // Reset Runtime-Timeout bei neuem Start
   if(s == PRODUCTION)
     runtimeTimeoutActive = false;
@@ -376,11 +381,10 @@ void setState(State s)
   }
 
   /* ========= ENDE Produktion ========= */
-  if (state == PRODUCTION && s != PRODUCTION) {
-    productionEnded = true;   // nur merken!
+ if (state == PRODUCTION && s != PRODUCTION && !productionEnded) {
+    lastProducedLiters = producedLitersSafe();   // 🔒 FINAL einfrieren
+    productionEnded = true;
   }
-
-
 
   state = s;
   stateStart = millis();
@@ -390,6 +394,20 @@ void setState(State s)
 }
 
 
+void stopProduction(const char* reason)
+{
+  strcpy(lastStopReason, reason);
+
+  if(state == PRODUCTION){
+    lastProducedLiters = producedLitersSafe();  // 🔒 exakt einmal
+    productionEnded = true;
+
+    if(settings.postFlushEnabled)
+      setState(POSTFLUSH);
+    else
+      setState(IDLE);
+  }
+}
 
 
 void enterError(const char* m){
@@ -409,10 +427,6 @@ void enterInfo(const char* m){
 void hardResetToIdle()
 {
   allOff();
-
-  cntIn = 0;
-  cntOut = 0;
-  prodStartCnt = 0;
   valveClosedTs = millis();
   setState(IDLE);   // ✅ nur das!
 }
@@ -519,11 +533,11 @@ void loop(){
 
   // ===== Web Stop =====
   if(webStopRequest){
-    webStopRequest=false;
-    autoBlocked = true; 
+    webStopRequest = false;
+    autoBlocked = true;
     autoPauseBlink = true;
-    strcpy(lastStopReason, "User stop");
-    hardResetToIdle();
+
+    stopProduction("User stop");  
   }
 
   // ===== Manual switch start (0 -> MANU rising edge) =====
@@ -566,11 +580,8 @@ void loop(){
   if(off){
     allOff();
 
-    if(state == PRODUCTION){
-      strcpy(lastStopReason, "User stop");
-      setState(IDLE);
-    } else {
-      state = IDLE;
+    if(state == PRODUCTION) {
+      stopProduction("User stop");
     }
   }
 
@@ -597,21 +608,13 @@ void loop(){
   
       /* ===================================================== */
       case IDLE: {
-          if (productionEnded && !litersFrozen) {
-          // 500 ms nach Ventilschluss warten
-          if (millis() - valveClosedTs > 500) {
-            lastProducedLiters = producedLitersSafe();
-            litersFrozen = true;
-          }
-        }
-
+       
         // Produktion physikalisch abgeschlossen → History schreiben
         if (productionEnded) {
           productionEnded = false;
 
           historyEndProduction(lastStopReason, lastProducedLiters);
           webNotifyHistoryUpdate();
-          litersFrozen = false;
         }
 
         setOut(Relay,false);
@@ -855,26 +858,31 @@ void loop(){
     runtimeSec = (millis() - productionStartMs) / 1000;
   
   
-  /* ---------- Flow-Berechnung (1s Mittelwert) ---------- */
-  static uint32_t lastCnt = 0;
-  static uint32_t lastT   = 0;
-
+  /* ---------- Flow-Berechnung (nur PRODUCTION) ---------- */
   uint32_t now = millis();
-  uint32_t dt  = now - lastT;
-
-  if(dt >= 3000) {   // 3s Fenster
-    uint32_t pulses = cntOut - lastCnt;
-    float dl = liters(pulses);
-
-    if(dl > 0)
-      currentFlowLpm = (dl / (dt / 1000.0f)) * 60.0f;
-    else
-      currentFlowLpm = 0.0f;
-
-    lastCnt = cntOut;
-    lastT   = now;
+  
+  if(state == PRODUCTION) {
+  
+    uint32_t dt = now - flowLastT;
+  
+    if(dt >= 3000) {   // 3s Fenster
+      uint32_t pulses = cntOut - flowLastCnt;
+      float dl = liters(pulses);
+  
+      if(dl > 0)
+        currentFlowLpm = (dl / (dt / 1000.0f)) * 60.0f;
+      else
+        currentFlowLpm = 0.0f;
+  
+      flowLastCnt = cntOut;
+      flowLastT   = now;
+    }
+  
+  } else {
+    // ❗ außerhalb PRODUCTION kein Flow
+    currentFlowLpm = 0.0f;
   }
-
+  
   /* ---------- SEND LOGIK ---------- */
   
   bool sendMQTTnow = false;
