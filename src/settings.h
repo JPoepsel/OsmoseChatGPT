@@ -22,6 +22,7 @@ struct Settings
   bool  autoFlushEnabled = DEF_AUTOFLUSH_ENABLED;
   bool  postFlushEnabled = DEF_POSTFLUSH_ENABLED;
   float postFlushTimeSec = DEF_POSTFLUSH_TIME_SEC;
+  float autoFlushMinTimeSec = DEF_AUTOFLUSH_MIN_TIME_SEC; 
 
   bool  serviceFlushEnabled     = DEF_SERVICE_FLUSH_ENABLED;
   uint32_t serviceFlushIntervalSec = DEF_SERVICE_FLUSH_INTERVAL_S;

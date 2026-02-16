@@ -1,4 +1,4 @@
-const SPIFF_VERSION = "WEB v3.0.0";
+const SPIFF_VERSION = "WEB v3.3.1";
 
 /* ============================================================
    GLOBALS
@@ -111,7 +111,8 @@ function connectWS()
       state.innerText = d.error ? (label + " : " + d.error) : label;
 
 
-      updateButtons(d.state);
+      updateButtons(d.state, d.mode, d.autoBlocked===true);
+
 
       if(d.state !== lastState && historyVisible())
         loadHistory(true);
@@ -126,6 +127,20 @@ function connectWS()
     if(d.tds !== undefined)    tds.innerText    = Number(d.tds).toFixed(1);
     if(d.liters !== undefined) liters.innerText = Number(d.liters).toFixed(2);
     if(d.flow !== undefined)   flow.innerText   = Number(d.flow).toFixed(2);
+    if(d.flowIn !== undefined && d.flow !== undefined) {
+      const fin = Number(d.flowIn);
+      const fout = Number(d.flow);
+
+      let eff = 0;
+      if(fin > 0)
+        eff = (fout / fin) * 100.0;
+
+      const el = document.getElementById("flowInEff");
+      if(el)
+        el.innerText =
+          `IN: ${fin.toFixed(2)} · Eff: ${eff.toFixed(0)} %`;
+    }
+
     if(d.left !== undefined)   left.innerText   = Number(d.left).toFixed(2);
     if(d.timeLeft !== undefined) {
       const sec = Math.max(0, Math.floor(d.timeLeft));
@@ -162,24 +177,25 @@ function stopCmd()
 /* ============================================================
    BUTTON STATE
    ============================================================ */
-
-function updateButtons(stateName)
+function updateButtons(state, mode, autoBlocked)
 {
   const start = document.getElementById("btnStart");
   const stop  = document.getElementById("btnStop");
 
   if(!start || !stop) return;
 
-  /* ⭐ INFO wie IDLE/ERROR behandeln */
-  if(stateName === "IDLE" || stateName === "ERROR" || stateName === "INFO"){
-    start.disabled = false;
-    stop.disabled  = true;
-  }
-  else{
-    start.disabled = true;
-    stop.disabled  = false;
-  }
+  const isOff      = (mode === "OFF");
+  const isIdle     = (state === "IDLE");
+  const isError    = (state === "ERROR");
+  const autoLocked = (mode === "AUTO" && autoBlocked);
+
+  // START: erlaubt bei IDLE oder ERROR
+  start.disabled = !((isIdle || isError) && !isOff && !autoLocked);
+
+  // STOP: bei IDLE und ERROR deaktiviert (Error springt automatisch auf start enebeled)
+  stop.disabled = (isIdle || isError);
 }
+
 
 
 /* ============================================================

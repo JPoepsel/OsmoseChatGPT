@@ -39,8 +39,15 @@
 <div class="grid">
   <div>TDS <b id="tds">0</b></div>
   <div>Liter <b id="liters">0</b></div>
-  <div>Flow L/min <b id="flow">0</b></div>
-  <div>  Rest
+  <div>
+    Flow L/min
+    <b id="flow">0</b>
+    <small id="flowInEff"
+           style="display:block;font-size:14px;color:#aaa;">
+      IN: 0.00 · Eff: 0 %
+    </small>
+</div>
+<div>  Rest
     <b id="left">0</b>
     <small id="timeLeft" style="display:block;font-size:14px;color:#aaa;">0m 0s</small>
   </div>
@@ -132,6 +139,14 @@
     TDS Flush Limit
     <input id="tdsLimit" type="number">
     <span class="hintText">Unterhalb dieses TDS-Wertes endet die Spülung und Produktion startet.</span>
+  </label>
+
+  <label class="hint">
+    Auto Flush Minimum Time (s)
+    <input id="autoFlushMinTimeSec" type="number" step="0.1">
+    <span class="hintText">
+      Mindestdauer der Vorspülung, unabhängig vom TDS-Wert.
+    </span>
   </label>
 
   <label class="hint">

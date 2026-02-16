@@ -36,11 +36,13 @@ void webSetStatus(const char* s)
 
 static void onHistoryUpdate()
 {
+  if(ws.count() == 0) return;   // ⭐ ABSICHERUNG
   ws.textAll("{\"histUpdate\":1}");
 }
 
 void webNotifyHistoryUpdate()
 {
+  if(ws.count() == 0) return;
   ws.textAll("{\"histUpdate\":1}");
 }
 
@@ -59,6 +61,7 @@ static void wsBroadcast(float tds,
                         const char* modeName,
                         float litersNow,
                         float flowLpm,
+                        float currentFlowInLpm,
                         float litersLeft,
                         float runtimeLeft,
                         const char* espVersion)   
@@ -75,6 +78,7 @@ static void wsBroadcast(float tds,
   doc["left"]=litersLeft;
   doc["timeLeft"] = runtimeLeft;
   doc["espVersion"] = espVersion;
+  doc["flowIn"] = currentFlowInLpm;
 
   if(webStatusLine.length())
     doc["status"] = webStatusLine;
@@ -145,11 +149,20 @@ setInterval(()=>{
 /* ============================================================ */
 void webInit()
 {
-  /* alle statischen Dateien */
-  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
-
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+ 
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    auto r = request->beginResponse(SPIFFS, "/index.html", "text/html");
+    r->addHeader("Cache-Control","no-cache, no-store, must-revalidate");
+    r->addHeader("Pragma","no-cache");
+    r->addHeader("Expires","0");
+    request->send(r);
+  });
+ 
+  server.serveStatic("/style.css", SPIFFS, "/style.css");
+  server.serveStatic("/app.js",    SPIFFS, "/app.js");
+  server.serveStatic("/Banner.png", SPIFFS, "/Banner.png");
 
   historySetUpdateCallback(onHistoryUpdate);
 
@@ -175,6 +188,8 @@ void webInit()
   doc["autoFlushEnabled"] = settings.autoFlushEnabled;
   doc["postFlushEnabled"] = settings.postFlushEnabled;
   doc["postFlushTimeSec"] = settings.postFlushTimeSec;
+  doc["autoFlushMinTimeSec"] = settings.autoFlushMinTimeSec;
+
 
   doc["serviceFlushEnabled"]     = settings.serviceFlushEnabled;
   doc["serviceFlushIntervalSec"] = settings.serviceFlushIntervalSec;
@@ -360,10 +375,7 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
     req->send(200, "application/json", historyGetTableJson());
   });
 
-  /* ⭐⭐⭐ Captive Portal Fallback */
-  server.onNotFound([](AsyncWebServerRequest *request){
-    request->redirect("/");
-  });
+  
 
   server.begin();
 }
@@ -371,7 +383,7 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
 
 /* ============================================================ */
 void webLoop(float tds, const char* stateName, float litersNow, bool isManualMode,
-             uint32_t runtimeSec, const char* modeName, float flowLpm, const char* espVersion)
+             uint32_t runtimeSec, const char* modeName, float flowLpm, float currentFlowInLpm, const char* espVersion)
 {
   static uint32_t lastCnt=0;
   static uint32_t lastT=millis();
@@ -395,7 +407,7 @@ void webLoop(float tds, const char* stateName, float litersNow, bool isManualMod
   }
 
   if(millis()-lastSend>300){
-    wsBroadcast(tds,stateName,modeName,litersNow,flowLpm,left,runtimeLeft,espVersion);
+    wsBroadcast(tds,stateName,modeName,litersNow,flowLpm,currentFlowInLpm,left,runtimeLeft,espVersion);
     lastSend=millis();
   }
 }

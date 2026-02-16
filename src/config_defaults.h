@@ -10,8 +10,6 @@
 
 // Process
 #define DEF_TDS_LIMIT                13.0f
-#define DEF_MAX_FLUSH_TIME_SEC       180.0f
-
 #define DEF_TDS_MAX_ALLOWED          30.0f
 
 #define DEF_MAX_RUNTIME_AUTO_SEC     2400.0f
@@ -32,6 +30,10 @@
 /* ===== ADD: Flush/Prepare Options ===== */
 #define DEF_PREPARE_TIME_SEC       10.0f
 #define DEF_AUTOFLUSH_ENABLED      true
+#define DEF_AUTOFLUSH_MIN_TIME_SEC   20.0f
+#define DEF_MAX_FLUSH_TIME_SEC       180.0f
+
+
 #define DEF_POSTFLUSH_ENABLED      true
 #define DEF_POSTFLUSH_TIME_SEC     10.0f
 

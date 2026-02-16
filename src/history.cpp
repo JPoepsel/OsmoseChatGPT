@@ -22,6 +22,7 @@ static float prodBuf[MAX_SAMPLES_24H];
 static uint16_t idx = 0;
 static uint32_t lastSampleMs = 0;
 static float lastProducedLiters = 0.0f;   // ⭐ neu für Flow-Berechnung
+static uint16_t sampleCount = 0;   // ⭐ Anzahl gültiger Samples
 
 
 
@@ -109,6 +110,14 @@ void loadTable()
 void historyInit()
 {
   loadTable();
+
+  idx = 0;
+  sampleCount = 0;
+  lastProducedLiters = 0.0f;
+
+  memset(tdsBuf,  0, sizeof(tdsBuf));
+  memset(flowBuf, 0, sizeof(flowBuf));
+  memset(prodBuf, 0, sizeof(prodBuf));
 }
 
 
@@ -133,6 +142,9 @@ void historyAddSample(float tds, float produced)
   prodBuf[idx] = produced;
 
   idx = (idx+1) % MAX_SAMPLES_24H;
+  if(sampleCount < MAX_SAMPLES_24H)
+    sampleCount++;
+
 }
 
 
@@ -186,27 +198,44 @@ void historyEndProduction(const char* reason, float finalLiters)
 
 String historyGetSeriesJson(uint32_t seconds)
 {
-  uint16_t samples = seconds / 30;
-  if(samples > MAX_SAMPLES_24H) samples = MAX_SAMPLES_24H;
+  uint16_t totalSamples = seconds / 30;
+  if(totalSamples > MAX_SAMPLES_24H)
+    totalSamples = MAX_SAMPLES_24H;
 
-  JsonDocument doc;
+  
+  StaticJsonDocument<32768> doc;
+
 
   JsonArray t = doc["tds"].to<JsonArray>();
   JsonArray f = doc["flow"].to<JsonArray>();
   JsonArray p = doc["prod"].to<JsonArray>();
 
-  int start = (idx - samples + MAX_SAMPLES_24H) % MAX_SAMPLES_24H;
+  /* Anzahl leerer Samples am Anfang */
+  uint16_t empty = 0;
+  if(sampleCount < totalSamples)
+    empty = totalSamples - sampleCount;
 
-  for(int i=0;i<samples;i++){
-    int k=(start+i)%MAX_SAMPLES_24H;
+  /* 1️⃣ Leere Zeit mit null füllen */
+  for(uint16_t i = 0; i < empty; i++) {
+    t.add(nullptr);
+    f.add(nullptr);
+    p.add(nullptr);
+  }
 
+  /* 2️⃣ Echte Samples anhängen */
+  uint16_t realSamples = min(sampleCount, totalSamples);
+  int start = (int)idx - (int)realSamples;
+  if(start < 0) start += MAX_SAMPLES_24H;
+
+  for(uint16_t i = 0; i < realSamples; i++) {
+    int k = (start + i) % MAX_SAMPLES_24H;
     t.add(tdsBuf[k]);
     f.add(flowBuf[k]);
     p.add(prodBuf[k]);
   }
 
   String s;
-  serializeJson(doc,s);
+  serializeJson(doc, s);
   return s;
 }
 
@@ -217,7 +246,7 @@ String historyGetSeriesJson(uint32_t seconds)
 
 String historyGetTableJson()
 {
-  JsonDocument doc;
+  StaticJsonDocument<8192> doc;    // <<< reicht hier
 
   JsonArray arr = doc.to<JsonArray>();
 
@@ -253,6 +282,15 @@ void historyClearProduction()
   currentRow = -1;
 
   memset(rows, 0, sizeof(rows));
+
+  idx = 0;
+  sampleCount = 0;
+  lastProducedLiters = 0.0f;
+
+  memset(tdsBuf,  0, sizeof(tdsBuf));
+  memset(flowBuf, 0, sizeof(flowBuf));
+  memset(prodBuf, 0, sizeof(prodBuf));
+
 
   // Datei leeren (persistent)
   File f = SPIFFS.open(FILE_NAME, "w");

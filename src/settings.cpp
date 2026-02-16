@@ -49,6 +49,8 @@ void settingsLoad()
   loadIfExists("autoFlushEnabled",  settings.autoFlushEnabled);
   loadIfExists("postFlushEnabled",  settings.postFlushEnabled);
   loadIfExists("postFlushTimeSec",  settings.postFlushTimeSec);
+  loadIfExists("autoFlushMinTimeSec", settings.autoFlushMinTimeSec);
+
 
   loadIfExists("serviceFlushEnabled",     settings.serviceFlushEnabled);
   loadIfExists("serviceFlushIntervalSec", settings.serviceFlushIntervalSec);

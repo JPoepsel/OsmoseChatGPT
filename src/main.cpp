@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.0.11"
+#define ESP_VERSION "ESP v3.3.1"
 
 #define DEBUG_LEVEL 2
 
@@ -84,6 +84,12 @@ static float lastProducedLiters = 0.0f;
 static uint32_t flowLastCnt = 0;
 static uint32_t flowLastT   = 0;
 
+#define TDS_AVG_SAMPLES 8
+
+static float tdsBuf[TDS_AVG_SAMPLES];
+static uint8_t tdsIdx = 0;
+static uint8_t tdsCount = 0;
+static float tdsSum = 0.0f;
 
 
 
@@ -120,6 +126,9 @@ State state=IDLE,lastState=IDLE;
 uint32_t stateStart=0;
 uint32_t prodStartCnt=0;
 
+static float currentFlowInLpm = 0.0f;
+static uint32_t flowInLastCnt = 0;
+static uint32_t flowInLastT   = 0;
 
 // ============================================================
 // Flow Counter (ORIGINAL)
@@ -154,11 +163,31 @@ float producedLitersSafe()
 }
 
 
-float rawToTds(int raw){
-  float v = raw * 3.3f / 4095.0f;
-  return (133.42f*v*v*v - 255.86f*v*v + 857.39f*v) * 0.5f;
-}
 
+float rawToTds(int raw)
+{
+  // Rohwert → Spannung
+  float v = raw * 3.3f / 4095.0f;
+
+  // Spannung → TDS 
+  float tds =
+    (133.42f*v*v*v - 255.86f*v*v + 857.39f*v) * 0.5f;
+
+  // --- Gleitender Mittelwert ---
+  if(tdsCount < TDS_AVG_SAMPLES) {
+    tdsBuf[tdsIdx] = tds;
+    tdsSum += tds;
+    tdsCount++;
+  } else {
+    tdsSum -= tdsBuf[tdsIdx];
+    tdsBuf[tdsIdx] = tds;
+    tdsSum += tds;
+  }
+
+  tdsIdx = (tdsIdx + 1) % TDS_AVG_SAMPLES;
+
+  return tdsSum / tdsCount;
+}
 
 
 // ============================================================
@@ -228,6 +257,9 @@ void mqttPublish(const char* stateName,
 
   snprintf(buf, sizeof(buf), "%.2f", flowLpm);
   mqtt.publish("osmose/flow", buf);
+
+  snprintf(buf, sizeof(buf), "%.2f", currentFlowInLpm);
+  mqtt.publish("osmose/flowIn", buf);
 
   snprintf(buf, sizeof(buf), "%.2f", litersNow);
   mqtt.publish("osmose/liters", buf);
@@ -350,7 +382,15 @@ void updateLEDs(State s){
 
 }
 
-
+void finalizeProductionIfRunning(const char* reason)
+{
+  if(state == PRODUCTION && !productionEnded) {
+    lastProducedLiters = producedLitersSafe();
+    productionEnded = true;
+    strncpy(lastStopReason, reason, sizeof(lastStopReason)-1);
+    lastStopReason[sizeof(lastStopReason)-1] = 0;
+  }
+}
 
 
 void setState(State s)
@@ -381,7 +421,7 @@ void setState(State s)
   }
 
   /* ========= ENDE Produktion ========= */
- if (state == PRODUCTION && s != PRODUCTION && !productionEnded) {
+  if (state == PRODUCTION && s != PRODUCTION && !productionEnded) {
     lastProducedLiters = producedLitersSafe();   // 🔒 FINAL einfrieren
     productionEnded = true;
   }
@@ -410,11 +450,22 @@ void stopProduction(const char* reason)
 }
 
 
-void enterError(const char* m){
+void enterError(const char* m)
+{
+  // laufende Produktion sauber abschließen
+  if(state == PRODUCTION) {
+    lastProducedLiters = producedLitersSafe();
+    productionEnded = false;   // ⬅ wichtig: wir schreiben JETZT
+    strncpy(lastStopReason, m, sizeof(lastStopReason)-1);
+    lastStopReason[sizeof(lastStopReason)-1] = 0;
+
+    historyEndProduction(lastStopReason, lastProducedLiters);
+    webNotifyHistoryUpdate();
+  }
+
   DBG_ERR("[%s] !!! ERROR: %s !!!\n", currentModeStr(), m);
-  lastErrorMsg = m;          
-  strncpy(lastStopReason, m, sizeof(lastStopReason)-1);
-  lastStopReason[sizeof(lastStopReason)-1] = 0;
+  lastErrorMsg = m;
+
   setState(ERROR);
 }
 
@@ -502,6 +553,8 @@ void loop(){
 
   mqttReconnect(tds);
   mqtt.loop();
+
+ 
   // =====================================================
   // ⭐ GLOBAL Auto-Flankenerkennung (immer aktiv!)
   // =====================================================
@@ -523,10 +576,14 @@ void loop(){
   ========================================= */
 
   // ===== Web Start =====
+  // ===== Web Start =====
   if(webStartRequest){
-    webStartRequest=false;
-    autoBlocked=false; 
-    autoPauseBlink=false;  
+    webStartRequest = false;
+
+    autoBlocked = false;
+    autoPauseBlink = false;
+    lastErrorMsg = "";
+
     setState(PREPARE);
   }
 
@@ -534,10 +591,17 @@ void loop(){
   // ===== Web Stop =====
   if(webStopRequest){
     webStopRequest = false;
-    autoBlocked = true;
-    autoPauseBlink = true;
 
-    stopProduction("User stop");  
+    finalizeProductionIfRunning("User stop");
+
+    bool manualMode = inActive(PIN_SMANU);
+
+    if(!manualMode) {          // AUTO
+      autoBlocked = true;
+      autoPauseBlink = true;
+    }
+
+    stopProduction("User stop");
   }
 
   // ===== Manual switch start (0 -> MANU rising edge) =====
@@ -555,6 +619,16 @@ void loop(){
   historyAddSample(tds, histLiters);
   
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
+ 
+  // STOP muss auch im ERROR wirken
+  if((webStopRequest || off) && state == ERROR) {
+    webStopRequest = false;
+    autoBlocked = false;
+    autoPauseBlink = false;
+    lastErrorMsg = "";
+    setState(IDLE);
+  }
+
 
   // ===== ADD: SAFETY =====
   if(inActive(PIN_WERROR)) enterError("Water error");
@@ -617,6 +691,7 @@ void loop(){
           webNotifyHistoryUpdate();
         }
 
+        
         setOut(Relay,false);
         setOut(WIn,false);
         setOut(OOut,false);
@@ -667,22 +742,35 @@ void loop(){
 
   
       /* ===================================================== */
+     /* ===================================================== */
       case AUTOFLUSH: {
         // Spülen zur S/S (Drain), kein Produkt
         setOut(Relay,true);
         setOut(WIn,true);
         setOut(OOut,false);
         setOut(OtoS,true);
-  
-        if (tds < settings.tdsLimit) {
+      
+        // Mindest-Spülzeit erfüllt?
+        bool minFlushDone =
+          (millis() - stateStart) >=
+          (uint32_t)(settings.autoFlushMinTimeSec * 1000.0f);
+      
+        // Erst nach Mindestzeit darf der TDS-Wert entscheiden
+        if(minFlushDone && tds < settings.tdsLimit) {
           prodStartCnt = cntOut;
           setState(PRODUCTION);
+          break;
         }
-  
-        if(millis() - stateStart > settings.maxFlushTimeSec * 1000)
+      
+        // Absolute Schutz-Obergrenze
+        if(millis() - stateStart > settings.maxFlushTimeSec * 1000.0f) {
           enterError("Flush timeout");
+          break;
+        }
+      
         break;
       }
+
   
       /* ===================================================== */
       case PRODUCTION: {
@@ -722,11 +810,11 @@ void loop(){
         /* =========================================================
            TDS Limit
            ========================================================= */
-        if(tds > settings.tdsMaxAllowed)
-        {
+        if(state == PRODUCTION && tds > settings.tdsMaxAllowed) {
           enterError("TDS too high");
           break;
-        }
+        } 
+
       
       
         /* =========================================================
@@ -800,11 +888,11 @@ void loop(){
  
       /* ===================================================== */
       case POSTFLUSH: {
-        // Nachspülen → nur Drain
-        setOut(Relay,true);
-        setOut(WIn,true);
-        setOut(OOut,false);
-        setOut(OtoS,true);
+        // Postflush: Rohwasser spült, Osmose hydraulisch gesperrt
+        setOut(Relay,true);   // Anlage aktiv
+        setOut(WIn,true);     // Rohwasser an
+        setOut(OOut,false);   // kein Produkt
+        setOut(OtoS,false);   // Osmose vollständig gesperrt
       
         if(millis() - stateStart > settings.postFlushTimeSec * 1000) {
 
@@ -858,31 +946,41 @@ void loop(){
     runtimeSec = (millis() - productionStartMs) / 1000;
   
   
-  /* ---------- Flow-Berechnung (nur PRODUCTION) ---------- */
-  uint32_t now = millis();
+    /* ---------- Flow-Berechnung (nur PRODUCTION) ---------- */
+    uint32_t now = millis();
   
-  if(state == PRODUCTION) {
-  
+    if(state == PRODUCTION) {
+
     uint32_t dt = now - flowLastT;
-  
-    if(dt >= 3000) {   // 3s Fenster
-      uint32_t pulses = cntOut - flowLastCnt;
-      float dl = liters(pulses);
-  
-      if(dl > 0)
-        currentFlowLpm = (dl / (dt / 1000.0f)) * 60.0f;
-      else
-        currentFlowLpm = 0.0f;
-  
+
+    if(dt >= 3000) {
+      // OUT
+      uint32_t pulsesOut = cntOut - flowLastCnt;
+      float dlOut = liters(pulsesOut);
+
+      currentFlowLpm = (dlOut > 0)
+        ? (dlOut / (dt / 1000.0f)) * 60.0f
+        : 0.0f;
+
       flowLastCnt = cntOut;
       flowLastT   = now;
+
+      // IN
+      uint32_t pulsesIn = cntIn - flowInLastCnt;
+      float dlIn = litersIn(pulsesIn);
+
+      currentFlowInLpm = (dlIn > 0)
+        ? (dlIn / (dt / 1000.0f)) * 60.0f
+        : 0.0f;
+
+      flowInLastCnt = cntIn;
+      flowInLastT   = now;
     }
-  
   } else {
-    // ❗ außerhalb PRODUCTION kein Flow
-    currentFlowLpm = 0.0f;
+    currentFlowLpm   = 0.0f;
+    currentFlowInLpm = 0.0f;
   }
-  
+
   /* ---------- SEND LOGIK ---------- */
   
   bool sendMQTTnow = false;
@@ -917,6 +1015,6 @@ void loop(){
   bool manualActive = inActive(PIN_SMANU);
   String status = buildStatusLine(tds);
   webSetStatus(status.c_str());   
-  webLoop(tds, sName[state], litersNow, manualActive, runtimeSec, currentModeStr(), currentFlowLpm, ESP_VERSION);
+  webLoop(tds, sName[state], litersNow, manualActive, runtimeSec, currentModeStr(), currentFlowLpm, currentFlowInLpm, ESP_VERSION);
 
 }
