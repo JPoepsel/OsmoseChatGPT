@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Osmose-Controller – Hilfe</title>
+<link rel="stylesheet" href="style.css">
+
+<style>
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    line-height: 1.55;
+    margin: 20px;
+    max-width: 980px;
+  }
+  h1, h2, h3 {
+    margin-top: 1.6em;
+  }
+  h1 { margin-top: 0; }
+  code {
+    background: #f3f3f3;
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+  table {
+    border-collapse: collapse;
+    margin: 12px 0;
+    width: 100%;
+  }
+  th, td {
+    border: 1px solid #ccc;
+    padding: 6px 8px;
+    vertical-align: top;
+  }
+  th {
+    width: 30%;
+  }
+</style>
+</head>
+<body>
+
+<h1>Osmose-Controller – Hilfe</h1>
+
+<p>
+Diese Seite erklärt die Bedienung und Funktionsweise der Anlage,
+inklusive Schalter, LEDs, Web-Oberfläche, History, Fehlermeldungen
+und <b>aller Einstellungen im Detail</b>.
+</p>
+
+<hr>
+
+<h2>1. Grundprinzip</h2>
+
+<p>
+Die Steuerung übernimmt den vollständigen Betrieb einer Umkehrosmoseanlage:
+Start, Spülen, Produktion, Überwachung und Abschaltung.
+Der Betrieb kann manuell oder vollautomatisch erfolgen.
+</p>
+
+<p>
+Während des Betriebs werden Wasserqualität (TDS),
+Durchfluss (Ein- und Ausgang) sowie die produzierte Wassermenge überwacht
+und aufgezeichnet.
+</p>
+
+<hr>
+
+<h2>2. Betriebsarten (Schalter)</h2>
+
+<h3>AUS</h3>
+<ul>
+  <li>Anlage vollständig deaktiviert</li>
+  <li>Alle Ventile und Ausgänge sind aus</li>
+  <li>Kein automatischer Start möglich</li>
+</ul>
+
+<h3>MANUAL</h3>
+<ul>
+  <li>Manueller Betrieb</li>
+  <li>Start über Schalter oder Web-Interface</li>
+  <li>Grenzwerte führen zu normalem Stopp oder Hinweis</li>
+</ul>
+
+<h3>AUTO</h3>
+<ul>
+  <li>Vollautomatischer Betrieb</li>
+  <li>Anlage startet selbstständig bei Bedarf</li>
+  <li>Fehler blockieren den automatischen Neustart,
+      bis sie quittiert werden</li>
+</ul>
+
+<hr>
+
+<h2>3. LEDs</h2>
+
+<table>
+<tr><th>LED</th><th>Bedeutung</th></tr>
+<tr><td>WLAN</td><td>Leuchtet bei aktiver Verbindung, blinkt beim Verbinden</td></tr>
+<tr><td>Spülen</td><td>Vor- oder Nachspülung aktiv</td></tr>
+<tr><td>Bezug</td><td>Produktionsbetrieb aktiv</td></tr>
+<tr><td>Error</td><td>Fehler oder Hinweiszustand</td></tr>
+</table>
+
+<hr>
+
+<h2>4. Zustände der Anlage</h2>
+
+<ul>
+  <li><b>IDLE</b> – Bereitschaft</li>
+  <li><b>PREPARE</b> – Vorbereitung / Druckaufbau</li>
+  <li><b>AUTOFLUSH</b> – Vorspülung zur Abwasserleitung</li>
+  <li><b>PRODUCTION</b> – Produktwasser wird erzeugt</li>
+  <li><b>POSTFLUSH</b> – Nachspülung nach Produktionsende</li>
+  <li><b>SERVICEFLUSH</b> – Regelmäßige Wartungsspülung</li>
+  <li><b>INFO</b> – Hinweis (kein Fehler)</li>
+  <li><b>ERROR</b> – Fehlerzustand</li>
+</ul>
+
+<hr>
+
+<h2>5. Hauptseite (Home)</h2>
+
+<p>Die Hauptseite zeigt live:</p>
+
+<ul>
+  <li>Betriebszustand und Modus</li>
+  <li>TDS-Wert</li>
+  <li>Durchfluss IN / OUT</li>
+  <li>Produzierte Wassermenge</li>
+  <li>Restlaufzeit (falls begrenzt)</li>
+</ul>
+
+<p>
+Über <b>Start</b> und <b>Stop</b> kann der Betrieb gesteuert werden,
+abhängig vom aktuellen Zustand.
+</p>
+
+<hr>
+
+<h2>6. History-Seite</h2>
+
+<h3>Grafik</h3>
+
+<ul>
+  <li>TDS-Verlauf</li>
+  <li>Produkt-Durchfluss</li>
+  <li>Produzierte Liter</li>
+</ul>
+
+<p>
+Es stehen mehrere feste Zeitfenster zur Verfügung.
+Fehlende Werte werden als 0 dargestellt,
+damit die Zeitachse konstant bleibt.
+</p>
+
+<h3>Bezugstabelle</h3>
+
+<p>Jeder Bezug wird gespeichert mit:</p>
+
+<ul>
+  <li>Modus</li>
+  <li>Start / Ende</li>
+  <li>Dauer</li>
+  <li>Menge</li>
+  <li>Stopp-Grund</li>
+</ul>
+
+<hr>
+
+<h2>7. Fehlermeldungen</h2>
+
+<table>
+<tr><th>Meldung</th><th>Bedeutung</th></tr>
+<tr><td>TDS too high</td><td>Wasserqualität über Grenzwert</td></tr>
+<tr><td>Flush timeout</td><td>Vorspülung dauerte zu lange</td></tr>
+<tr><td>Volume limit</td><td>Maximale Produktionsmenge erreicht</td></tr>
+<tr><td>Max runtime reached</td><td>Maximale Laufzeit überschritten</td></tr>
+<tr><td>Water error</td><td>Externer Wassersensor meldet Fehler</td></tr>
+<tr><td>Level sensor mismatch</td><td>Unplausible Füllstandssensoren</td></tr>
+</table>
+
+<hr>
+
+<h2>8. Einstellungen (Settings)</h2>
+
+<h3>8.1 Durchfluss / Zähler</h3>
+
+<table>
+<tr>
+  <th>Pulses per Liter IN</th>
+  <td>
+    Kalibrierwert für den Rohwasser-Durchfluss.
+    Gibt an, wie viele Impulse der Sensor pro Liter liefert.
+  </td>
+</tr>
+<tr>
+  <th>Pulses per Liter OUT</th>
+  <td>
+    Kalibrierwert für das Produktwasser.
+    Wird für Durchfluss- und Mengenberechnung verwendet.
+  </td>
+</tr>
+</table>
+
+<h3>8.2 Wasserqualität (TDS)</h3>
+
+<table>
+<tr>
+  <th>TDS Limit</th>
+  <td>
+    Zielwert für sauberes Wasser.
+    Erst wenn der TDS-Wert darunter liegt,
+    darf die Produktion beginnen (nach der Vorspülung).
+  </td>
+</tr>
+<tr>
+  <th>TDS Max Allowed</th>
+  <td>
+    Absoluter Grenzwert während der Produktion.
+    Wird dieser überschritten, stoppt die Anlage mit Fehler.
+  </td>
+</tr>
+</table>
+
+<h3>8.3 Vorspülung (Auto-Flush)</h3>
+
+<table>
+<tr>
+  <th>Auto Flush Enabled</th>
+  <td>
+    Aktiviert die automatische Vorspülung vor jeder Produktion.
+  </td>
+</tr>
+<tr>
+  <th>Prepare Time</th>
+  <td>
+    Kurze Vorbereitungszeit zum Druckaufbau,
+    bevor gespült oder produziert wird.
+  </td>
+</tr>
+<tr>
+  <th>Auto Flush Minimum Time</th>
+  <td>
+    Mindestdauer der Vorspülung.
+    Während dieser Zeit wird unabhängig vom TDS-Wert gespült.
+  </td>
+</tr>
+<tr>
+  <th>Max Flush Time</th>
+  <td>
+    Absolute Obergrenze für die Vorspülung.
+    Wird sie überschritten, erfolgt ein Fehlerabbruch.
+  </td>
+</tr>
+</table>
+
+<h3>8.4 Nachspülung (Post-Flush)</h3>
+
+<table>
+<tr>
+  <th>Post Flush Enabled</th>
+  <td>
+    Aktiviert die Nachspülung nach Produktionsende.
+  </td>
+</tr>
+<tr>
+  <th>Post Flush Time</th>
+  <td>
+    Dauer der Nachspülung in Sekunden.
+  </td>
+</tr>
+</table>
+
+<h3>8.5 Begrenzungen</h3>
+
+<table>
+<tr>
+  <th>Max Runtime (AUTO)</th>
+  <td>
+    Maximale Laufzeit im Automatikbetrieb.
+    Überschreitung führt zu Fehler.
+  </td>
+</tr>
+<tr>
+  <th>Max Runtime (MANUAL)</th>
+  <td>
+    Maximale Laufzeit im manuellen Betrieb.
+    Überschreitung führt zu Hinweis oder Stopp.
+  </td>
+</tr>
+<tr>
+  <th>Max Production (AUTO)</th>
+  <td>
+    Maximale Wassermenge im Automatikbetrieb.
+    Überschreitung führt zu Fehler.
+  </td>
+</tr>
+<tr>
+  <th>Max Production (MANUAL)</th>
+  <td>
+    Maximale Wassermenge im manuellen Betrieb.
+    Führt zu normalem Produktionsende.
+  </td>
+</tr>
+</table>
+
+<h3>8.6 Service-Spülung</h3>
+
+<table>
+<tr>
+  <th>Service Flush Enabled</th>
+  <td>
+    Aktiviert automatische Wartungsspülungen
+    bei längerer Nichtbenutzung.
+  </td>
+</tr>
+<tr>
+  <th>Service Flush Interval</th>
+  <td>
+    Zeitintervall zwischen zwei Wartungsspülungen.
+  </td>
+</tr>
+<tr>
+  <th>Service Flush Time</th>
+  <td>
+    Dauer der Wartungsspülung.
+  </td>
+</tr>
+</table>
+
+<h3>8.7 System</h3>
+
+<table>
+<tr>
+  <th>WiFi SSID / Password</th>
+  <td>
+    Zugangsdaten für das WLAN.
+  </td>
+</tr>
+<tr>
+  <th>mDNS Name</th>
+  <td>
+    Gerätename im Netzwerk (z. B. <code>http://osmose.local</code>).
+  </td>
+</tr>
+<tr>
+  <th>MQTT Host / Port</th>
+  <td>
+    Optionaler MQTT-Server zur externen Überwachung.
+  </td>
+</tr>
+</table>
+
+<hr>
+
+<h2>9. Hinweise</h2>
+
+<ul>
+  <li>Änderungen wirken sofort</li>
+  <li>Fehler dienen dem Schutz der Anlage</li>
+  <li>Bei Unsicherheit konservative Werte wählen</li>
+</ul>
+
+</body>
+</html>

@@ -1,4 +1,4 @@
-const SPIFF_VERSION = "WEB v3.4.2";
+const SPIFF_VERSION = "WEB v3.4.3";
 
 /* ============================================================
    GLOBALS

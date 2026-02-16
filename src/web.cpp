@@ -163,6 +163,7 @@ void webInit()
   server.serveStatic("/style.css", SPIFFS, "/style.css");
   server.serveStatic("/app.js",    SPIFFS, "/app.js");
   server.serveStatic("/Banner.png", SPIFFS, "/Banner.png");
+  server.serveStatic("/Hilfe.html", SPIFFS, "/Hilfe.html");
 
   historySetUpdateCallback(onHistoryUpdate);
 

@@ -413,3 +413,17 @@ canvas{
     text-align: center;
   }
 }
+
+/* =========================================================
+   NAV HELP BUTTON (schmal)
+   ========================================================= */
+
+nav .navHelp{
+  flex: 0 0 auto;   /* nimmt keinen Flex-Anteil */
+}
+
+nav .navHelp button{
+  flex: 0;          /* überschreibt nav button { flex:1 } */
+  padding: 12px 14px;
+  font-size: 18px;
+}
