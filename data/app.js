@@ -1,4 +1,4 @@
-const SPIFF_VERSION = "WEB v3.3.1";
+const SPIFF_VERSION = "WEB v3.4.2";
 
 /* ============================================================
    GLOBALS
@@ -345,7 +345,7 @@ function initHistory()
     }
   });
 
-  histTimer = setInterval(loadHistory, 30000);
+  histTimer = setInterval(loadHistory, 4000);
 
   document.getElementById("rangeSel").onchange = () => loadHistory(true);
 }
@@ -356,12 +356,14 @@ function initHistory()
 
 function loadHistory(force=false)
 {
-  if(!historyVisible() && !force) return;
+  if(!chart) return;
+  const series = document.getElementById("rangeSel").value;
 
-  const sec = document.getElementById("rangeSel").value;
-
-  fetch("/api/history/series?range="+sec)
-    .then(r => r.json())
+  fetch("/api/history/series?series=" + series)
+    .then(r => {
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
     .then(d =>
     {
       const len = d.tds.length;
@@ -374,7 +376,8 @@ function loadHistory(force=false)
       chart.update();
 
       loadHistoryTable();
-    });
+    })
+    .catch(e => console.error("history fetch failed", e));
 }
 
 

@@ -13,13 +13,23 @@ void historySetUpdateCallback(HistoryUpdateCallback cb);
 
 void historyInit();
 
-void historyAddSample(float tds, float produced);
+enum HistorySeries {
+  HIST_2S,
+  HIST_30S,
+  HIST_600S
+};
+
+void historyAddSample2s(float tds,
+                        float produced,
+                        float flowOutLpm,
+                        float flowInLpm);
+String historyGetSeriesJson(HistorySeries series);
+
+
 
 void historyStartProduction(const char* mode);
 void historyEndProduction(const char* reason, float finalLiters);
 void historyClearProduction();
 
-
-String historyGetSeriesJson(uint32_t seconds);
 String historyGetTableJson();
 uint8_t historyGetRowCount();

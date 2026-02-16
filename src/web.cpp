@@ -344,13 +344,29 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
     });
 
 
-  server.on("/api/history/series", HTTP_GET, [](AsyncWebServerRequest *req){
-    uint32_t range = 3600;
-    if(req->hasParam("range"))
-      range = req->getParam("range")->value().toInt();
+  server.on("/api/history/series", HTTP_GET,
+    [](AsyncWebServerRequest *req)
+    {
+      if(!req->hasParam("series")) {
+        req->send(400, "text/plain", "missing series");
+        return;
+      }
 
-    req->send(200, "application/json", historyGetSeriesJson(range));
-  });
+      String s = req->getParam("series")->value();
+      HistorySeries type;
+
+      if(s == "2s")       type = HIST_2S;
+      else if(s == "30s") type = HIST_30S;
+      else if(s == "600s")type = HIST_600S;
+      else {
+        req->send(400, "text/plain", "invalid series");
+        return;
+      }
+
+      req->send(200, "application/json",
+                historyGetSeriesJson(type));
+    });
+
 
   /* REBOOT */
   server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *req){

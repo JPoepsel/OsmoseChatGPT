@@ -3,50 +3,65 @@
 #include <ArduinoJson.h>
 
 /* ============================================================
-   CONFIG
+   SERIES CONFIG
    ============================================================ */
 
-#define SAMPLE_INTERVAL_MS 30000
-#define MAX_SAMPLES_24H (24*60*2)   // alle 30s = 2880
+#define HIST_2S_COUNT    150     // ~5 Minuten
+#define HIST_30S_COUNT   150     // ~75 Minuten
+#define HIST_600S_COUNT  150     // ~25 Stunden
+
+/* ============================================================
+   SERIES BUFFERS (RAM, FIXED SIZE, ZERO-FILLED)
+   ============================================================ */
+
+static float tds2s[HIST_2S_COUNT];
+static float flow2s[HIST_2S_COUNT];
+static float prod2s[HIST_2S_COUNT];
+
+static float tds30s[HIST_30S_COUNT];
+static float flow30s[HIST_30S_COUNT];
+static float prod30s[HIST_30S_COUNT];
+
+static float tds600s[HIST_600S_COUNT];
+static float flow600s[HIST_600S_COUNT];
+static float prod600s[HIST_600S_COUNT];
+
+static uint16_t idx2s   = 0;
+static uint16_t idx30s  = 0;
+static uint16_t idx600s = 0;
+
+static uint32_t last2sMs = 0;
+
+/* aggregation helpers */
+static float accTds30   = 0;
+static float accFlow30  = 0;
+static uint8_t accCnt30 = 0;
+
+static float accTds600    = 0;
+static float accFlow600   = 0;
+static uint16_t accCnt600 = 0;
+
+/* ============================================================
+   TABLE (persistent, UNCHANGED)
+   ============================================================ */
+
 #define MAX_ROWS 100
-
-
-/* ============================================================
-   SERIES BUFFERS (RAM)
-   ============================================================ */
-
-static float tdsBuf[MAX_SAMPLES_24H];
-static float flowBuf[MAX_SAMPLES_24H];
-static float prodBuf[MAX_SAMPLES_24H];
-
-static uint16_t idx = 0;
-static uint32_t lastSampleMs = 0;
-static float lastProducedLiters = 0.0f;   // ⭐ neu für Flow-Berechnung
-static uint16_t sampleCount = 0;   // ⭐ Anzahl gültiger Samples
-
-
-
-/* ============================================================
-   TABLE (persistent)
-   ============================================================ */
+static const char* FILE_NAME = "/history.bin";
 
 struct Row{
   time_t startTs;
   time_t endTs;
   float  liters;
   char   reason[20];
-  char   mode[10];     
+  char   mode[10];
 };
 
 static Row rows[MAX_ROWS];
 static uint8_t rowCount = 0;
 static int currentRow = -1;
 
-static const char* FILE_NAME="/history.bin";
-
-
 /* ============================================================
-   ⭐⭐⭐ UPDATE CALLBACK (NEU – PUSH STATT POLLING)
+   UPDATE CALLBACK
    ============================================================ */
 
 static HistoryUpdateCallback updateCb = nullptr;
@@ -56,115 +71,177 @@ void historySetUpdateCallback(HistoryUpdateCallback cb)
   updateCb = cb;
 }
 
-
-/* ============================================================ */
-
-uint8_t historyGetRowCount()
-{
-  return rowCount;
-}
-
-
 /* ============================================================
-   SAVE / LOAD
+   TABLE SAVE / LOAD
    ============================================================ */
 
-void saveTable()
+static void saveTable()
 {
-  File f = SPIFFS.open(FILE_NAME,"w");
+  File f = SPIFFS.open(FILE_NAME, "w");
   if(!f) return;
 
   f.write((uint8_t*)&rowCount, sizeof(rowCount));
   f.write((uint8_t*)rows, sizeof(rows));
-
   f.close();
 
-  // ⭐⭐⭐ SOFORT CLIENT INFORMIEREN ⭐⭐⭐
   if(updateCb) updateCb();
 }
 
-
-void loadTable()
+static void loadTable()
 {
   if(!SPIFFS.exists(FILE_NAME)) return;
 
-  File f = SPIFFS.open(FILE_NAME,"r");
+  File f = SPIFFS.open(FILE_NAME, "r");
   if(!f) return;
 
   size_t n = 0;
-
   n += f.read((uint8_t*)&rowCount, sizeof(rowCount));
   n += f.read((uint8_t*)rows, sizeof(rows));
 
-  if(n != sizeof(rowCount) + sizeof(rows)){
-    memset(rows,0,sizeof(rows));
+  if(n != sizeof(rowCount) + sizeof(rows)) {
+    memset(rows, 0, sizeof(rows));
     rowCount = 0;
   }
 
   f.close();
 }
 
-
-/* ============================================================ */
+/* ============================================================
+   INIT
+   ============================================================ */
 
 void historyInit()
 {
   loadTable();
 
-  idx = 0;
-  sampleCount = 0;
-  lastProducedLiters = 0.0f;
+  memset(tds2s,   0, sizeof(tds2s));
+  memset(flow2s,  0, sizeof(flow2s));
+  memset(prod2s,  0, sizeof(prod2s));
 
-  memset(tdsBuf,  0, sizeof(tdsBuf));
-  memset(flowBuf, 0, sizeof(flowBuf));
-  memset(prodBuf, 0, sizeof(prodBuf));
+  memset(tds30s,  0, sizeof(tds30s));
+  memset(flow30s, 0, sizeof(flow30s));
+  memset(prod30s, 0, sizeof(prod30s));
+
+  memset(tds600s,  0, sizeof(tds600s));
+  memset(flow600s, 0, sizeof(flow600s));
+  memset(prod600s, 0, sizeof(prod600s));
+
+  idx2s = idx30s = idx600s = 0;
+  accCnt30 = accCnt600 = 0;
 }
 
-
 /* ============================================================
-   SERIES SAMPLES
+   2s BASE SAMPLE + AGGREGATION
    ============================================================ */
 
-void historyAddSample(float tds, float produced)
+void historyAddSample2s(float tds,
+                        float produced,
+                        float flowOutLpm,
+                        float flowInLpm)
 {
-  if(millis() - lastSampleMs < SAMPLE_INTERVAL_MS) return;
+  uint32_t now = millis();
+  if(now - last2sMs < 2000) return;
+  last2sMs = now;
 
-  lastSampleMs = millis();
+  /* --- 2s --- */
+  tds2s[idx2s]  = tds;
+  flow2s[idx2s] = flowOutLpm;
+  prod2s[idx2s] = produced;
+  idx2s = (idx2s + 1) % HIST_2S_COUNT;
 
-  /* ⭐ echter Flow in L/min */
-  float delta = produced - lastProducedLiters;
-  float flowLpm = delta * 2.0f;   // 30s sample → *2
+  /* --- 30s aggregation (15 × 2s) --- */
+  accTds30  += tds;
+  accFlow30 += flowOutLpm;
+  accCnt30++;
 
-  lastProducedLiters = produced;
+  if(accCnt30 >= 15) {
+    tds30s[idx30s]  = accTds30 / accCnt30;
+    flow30s[idx30s] = accFlow30 / accCnt30;
+    prod30s[idx30s] = produced;
 
-  tdsBuf[idx]  = tds;
-  flowBuf[idx] = flowLpm;   // ⭐ jetzt korrekt
-  prodBuf[idx] = produced;
+    idx30s = (idx30s + 1) % HIST_30S_COUNT;
+    accTds30 = accFlow30 = 0;
+    accCnt30 = 0;
+  }
 
-  idx = (idx+1) % MAX_SAMPLES_24H;
-  if(sampleCount < MAX_SAMPLES_24H)
-    sampleCount++;
+  /* --- 600s aggregation (300 × 2s) --- */
+  accTds600  += tds;
+  accFlow600 += flowOutLpm;
+  accCnt600++;
 
+  if(accCnt600 >= 300) {
+    tds600s[idx600s]  = accTds600 / accCnt600;
+    flow600s[idx600s] = accFlow600 / accCnt600;
+    prod600s[idx600s] = produced;
+
+    idx600s = (idx600s + 1) % HIST_600S_COUNT;
+    accTds600 = accFlow600 = 0;
+    accCnt600 = 0;
+  }
 }
 
 
 /* ============================================================
-   START / END PRODUCTION
+   SERIES JSON
    ============================================================ */
+
+String historyGetSeriesJson(HistorySeries s)
+{
+  StaticJsonDocument<16384> doc;
+  JsonArray t = doc["tds"].to<JsonArray>();
+  JsonArray f = doc["flow"].to<JsonArray>();
+  JsonArray p = doc["prod"].to<JsonArray>();
+
+  float *tdsArr, *flowArr, *prodArr;
+  uint16_t count, idx;
+
+  if(s == HIST_2S) {
+    tdsArr = tds2s; flowArr = flow2s; prodArr = prod2s;
+    count = HIST_2S_COUNT; idx = idx2s;
+  }
+  else if(s == HIST_30S) {
+    tdsArr = tds30s; flowArr = flow30s; prodArr = prod30s;
+    count = HIST_30S_COUNT; idx = idx30s;
+  }
+  else {
+    tdsArr = tds600s; flowArr = flow600s; prodArr = prod600s;
+    count = HIST_600S_COUNT; idx = idx600s;
+  }
+
+  for(uint16_t i = 0; i < count; i++) {
+    uint16_t k = (idx + i) % count;
+    t.add(tdsArr[k]);
+    f.add(flowArr[k]);
+    p.add(prodArr[k]);
+  }
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
+/* ============================================================
+   PRODUCTION TABLE (UNCHANGED BEHAVIOR)
+   ============================================================ */
+
+uint8_t historyGetRowCount()
+{
+  return rowCount;
+}
 
 void historyStartProduction(const char* mode)
 {
   currentRow = 0;
 
-  uint8_t moveCount = min(rowCount, (uint8_t)(MAX_ROWS-1));
+  uint8_t moveCount = min(rowCount, (uint8_t)(MAX_ROWS - 1));
   if(moveCount > 0)
-    memmove(&rows[1], &rows[0], sizeof(Row)*moveCount);
+    memmove(&rows[1], &rows[0], sizeof(Row) * moveCount);
 
   rows[0] = {};
   rows[0].startTs = time(nullptr);
 
-  strncpy(rows[0].mode, mode, sizeof(rows[0].mode)-1);
-  rows[0].mode[sizeof(rows[0].mode)-1] = 0;
+  strncpy(rows[0].mode, mode, sizeof(rows[0].mode) - 1);
+  rows[0].mode[sizeof(rows[0].mode) - 1] = 0;
 
   if(rowCount < MAX_ROWS)
     rowCount++;
@@ -179,78 +256,24 @@ void historyEndProduction(const char* reason, float finalLiters)
   Row &r = rows[currentRow];
 
   r.endTs  = time(nullptr);
-  r.liters = finalLiters;   
+  r.liters = finalLiters;
 
   if(!reason || !reason[0])
     reason = "Stopped";
 
-  strncpy(r.reason, reason, sizeof(r.reason)-1);
-  r.reason[sizeof(r.reason)-1] = 0;
+  strncpy(r.reason, reason, sizeof(r.reason) - 1);
+  r.reason[sizeof(r.reason) - 1] = 0;
 
   currentRow = -1;
   saveTable();
 }
 
-
-/* ============================================================
-   JSON – SERIES
-   ============================================================ */
-
-String historyGetSeriesJson(uint32_t seconds)
-{
-  uint16_t totalSamples = seconds / 30;
-  if(totalSamples > MAX_SAMPLES_24H)
-    totalSamples = MAX_SAMPLES_24H;
-
-  
-  StaticJsonDocument<32768> doc;
-
-
-  JsonArray t = doc["tds"].to<JsonArray>();
-  JsonArray f = doc["flow"].to<JsonArray>();
-  JsonArray p = doc["prod"].to<JsonArray>();
-
-  /* Anzahl leerer Samples am Anfang */
-  uint16_t empty = 0;
-  if(sampleCount < totalSamples)
-    empty = totalSamples - sampleCount;
-
-  /* 1️⃣ Leere Zeit mit null füllen */
-  for(uint16_t i = 0; i < empty; i++) {
-    t.add(nullptr);
-    f.add(nullptr);
-    p.add(nullptr);
-  }
-
-  /* 2️⃣ Echte Samples anhängen */
-  uint16_t realSamples = min(sampleCount, totalSamples);
-  int start = (int)idx - (int)realSamples;
-  if(start < 0) start += MAX_SAMPLES_24H;
-
-  for(uint16_t i = 0; i < realSamples; i++) {
-    int k = (start + i) % MAX_SAMPLES_24H;
-    t.add(tdsBuf[k]);
-    f.add(flowBuf[k]);
-    p.add(prodBuf[k]);
-  }
-
-  String s;
-  serializeJson(doc, s);
-  return s;
-}
-
-
-/* ============================================================
-   JSON – TABLE
-   ============================================================ */
-
 String historyGetTableJson()
 {
-  StaticJsonDocument<8192> doc;    // <<< reicht hier
-
+  StaticJsonDocument<8192> doc;
   JsonArray arr = doc.to<JsonArray>();
 
-  for(int i=0;i<rowCount;i++){
+  for(int i = 0; i < rowCount; i++) {
     JsonObject o = arr.add<JsonObject>();
 
     o["mode"]   = rows[i].mode;
@@ -262,37 +285,23 @@ String historyGetTableJson()
       dur = rows[i].endTs - rows[i].startTs;
 
     o["duration"] = dur;
-
-    o["liters"] = rows[i].liters;
-    o["reason"] = rows[i].reason;
-
+    o["liters"]   = rows[i].liters;
+    o["reason"]   = rows[i].reason;
   }
 
-  String s;
-  serializeJson(doc,s);
-  return s;
+  String out;
+  serializeJson(doc, out);
+  return out;
 }
 
-/* ============================================================
-   CLEAR PRODUCTION TABLE ONLY
-   ============================================================ */
 void historyClearProduction()
 {
   rowCount = 0;
   currentRow = -1;
-
   memset(rows, 0, sizeof(rows));
 
-  idx = 0;
-  sampleCount = 0;
-  lastProducedLiters = 0.0f;
-
-  memset(tdsBuf,  0, sizeof(tdsBuf));
-  memset(flowBuf, 0, sizeof(flowBuf));
-  memset(prodBuf, 0, sizeof(prodBuf));
-
-
-  // Datei leeren (persistent)
   File f = SPIFFS.open(FILE_NAME, "w");
   if(f) f.close();
+
+  if(updateCb) updateCb();
 }

@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.3.1"
+#define ESP_VERSION "ESP v3.4.1"
 
 #define DEBUG_LEVEL 2
 
@@ -616,8 +616,12 @@ void loop(){
 
   float histLiters =
     (state == PRODUCTION) ? producedLitersSafe() : lastProducedLiters;
-  historyAddSample(tds, histLiters);
-  
+
+    historyAddSample2s(tds,
+                       histLiters,
+                       currentFlowLpm,
+                       currentFlowInLpm);
+
   bool off=!inActive(PIN_SAUTO)&&!inActive(PIN_SMANU);
  
   // STOP muss auch im ERROR wirken
