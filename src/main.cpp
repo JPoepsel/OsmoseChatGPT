@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.4.1"
+#define ESP_VERSION "ESP v3.5.2"
 
 #define DEBUG_LEVEL 2
 
@@ -26,6 +26,7 @@
 #include "history.h"
 #include "settings.h"
 
+#define TDS_AVG_SAMPLES 8
 
 
 // ================= DEBUG =================
@@ -55,13 +56,8 @@
 const char* AP_SSID="osmose";
 DNSServer dnsServer;
 const byte DNS_PORT = 53;
-
-
 bool wifiConnected=false;
 
-String lastErrorMsg = "";
-static bool runtimeTimeoutActive = false;
-static bool autoPauseBlink = false;
 
 
 // ================= MQTT =================
@@ -74,6 +70,10 @@ const char* NTP_SERVER="pool.ntp.org";
 const long GMT_OFFSET=3600;
 const int  DST_OFFSET=3600;
 
+String lastErrorMsg = "";
+static bool runtimeTimeoutActive = false;
+static bool autoPauseBlink = false;
+
 uint32_t productionStartMs = 0;  
 
 static bool autoBlocked = false;   // verhindert Auto-Neustart nach Schutzlimit
@@ -84,7 +84,11 @@ static float lastProducedLiters = 0.0f;
 static uint32_t flowLastCnt = 0;
 static uint32_t flowLastT   = 0;
 
-#define TDS_AVG_SAMPLES 8
+static uint32_t ratioStartCntIn  = 0;
+static uint32_t ratioStartCntOut = 0;
+static uint32_t ratioStartMs     = 0;
+
+
 
 static float tdsBuf[TDS_AVG_SAMPLES];
 static uint8_t tdsIdx = 0;
@@ -106,8 +110,11 @@ static float tdsSum = 0.0f;
 #define PIN_I2C_SCL     7
 
 
-// ================= PARAMETER =================
-#define MAX_AFTERFLOW_TIME 0.5f   // Sekunden
+// ---- Flow-Sicherheitsparameter ----
+#define FLOW_CLOSED_GRACE_MS    1500   // Nachlauf nach Ventil-ZU ignorieren
+#define FLOW_CLOSED_MAX_PULSES  10     // erlaubte Impulse danach
+#define FLOW_CLOSED_WINDOW_MS   3000   // Zeitfenster für Bewertung
+
 
 static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
@@ -404,10 +411,13 @@ void setState(State s)
   flowLastT   = millis();
   currentFlowLpm = 0.0f;
 
-  // Reset Runtime-Timeout bei neuem Start
-  if(s == PRODUCTION)
+  
+  if(s == PRODUCTION) {
     runtimeTimeoutActive = false;
-
+    ratioStartCntIn  = cntIn;
+    ratioStartCntOut = cntOut;
+    ratioStartMs     = millis();
+  }
 
   /* Nutzung setzt Service-Timer zurück */
   if(s == PRODUCTION || s == PREPARE)
@@ -486,57 +496,38 @@ void hardResetToIdle()
 
 
 // ============================================================
-// Setup (ORIGINAL)
+// Setup 
 // ============================================================
 void setup(){
-
   Serial.begin(115200);
   delay(800);
-
-  SPIFFS.begin(true);   // <<< nur hier!
+  SPIFFS.begin(true);  
   historyInit();
-
-
   DBG_INFO(ESP_VERSION); DBG_INFO("\n");
   const esp_partition_t* p = esp_ota_get_running_partition();
   Serial.printf("Running partition: %s\n", p->label);
-
-
   pinMode(PIN_WLOW,INPUT_PULLUP);
   pinMode(PIN_WHIGH,INPUT_PULLUP);
   pinMode(PIN_WERROR,INPUT_PULLUP);
   pinMode(PIN_SAUTO,INPUT_PULLUP);
   pinMode(PIN_SMANU,INPUT_PULLUP);
-
   attachInterrupt(PIN_WCOUNT_IN,isrIn,RISING);
   attachInterrupt(PIN_WCOUNT_OUT,isrOut,RISING);
-
   analogReadResolution(12);
-
   Wire.begin(PIN_I2C_SDA,PIN_I2C_SCL);
   pcf.begin(0x38);
-
   allOff();
-
   configLoad();
   settingsLoad();   // ⭐ zuerst laden
-
   startWifi();      // ⭐ erst danach benutzen
   webInit();
   lastSwitchState = inActive(PIN_SMANU); // aktuellen Schalterzustand als „bereits gedrückt“ merken. Damit gibt es keine Fake-Flanke.
-
 }
 
 String buildStatusLine(float tds)
 {
   char buf[80];
-
-  snprintf(buf, sizeof(buf),
-           "IN:%lu  OUT:%lu  TDS:%.1f",
-           cntIn,
-           cntOut,
-           tds);
-
+  snprintf(buf, sizeof(buf),"IN:%lu  OUT:%lu  TDS:%.1f",cntIn,cntOut,tds);
   return String(buf);
 }
 
@@ -576,7 +567,6 @@ void loop(){
   ========================================= */
 
   // ===== Web Start =====
-  // ===== Web Start =====
   if(webStartRequest){
     webStartRequest = false;
 
@@ -591,17 +581,24 @@ void loop(){
   // ===== Web Stop =====
   if(webStopRequest){
     webStopRequest = false;
-
-    finalizeProductionIfRunning("User stop");
-
     bool manualMode = inActive(PIN_SMANU);
-
-    if(!manualMode) {          // AUTO
+    // AUTO → blockieren
+    if(!manualMode) {
       autoBlocked = true;
       autoPauseBlink = true;
     }
-
-    stopProduction("User stop");
+    // ----- Produktion läuft -----
+    if(state == PRODUCTION) {
+      finalizeProductionIfRunning("User stop");
+      stopProduction("User stop");
+    }
+    // ----- Vorbereitung / Spülen -----
+    else if(state == PREPARE || state == AUTOFLUSH) {
+      lastProducedLiters = 0.0f;
+      productionEnded = false;
+      strcpy(lastStopReason, "User stop");
+      setState(IDLE);   // kein PostFlush!
+    }
   }
 
   // ===== Manual switch start (0 -> MANU rising edge) =====
@@ -637,18 +634,67 @@ void loop(){
   // ===== ADD: SAFETY =====
   if(inActive(PIN_WERROR)) enterError("Water error");
 
-  static uint32_t lastCntIn=0;
-  if(!wInOn && cntIn!=lastCntIn) {
- //   if(millis() - valveClosedTs > (uint32_t)(MAX_AFTERFLOW_TIME*1000)){
- //     enterError("Flow while valve closed");
- //   }
+  // =====================================================
+  // Einlauf trotz geschlossenem Einlassventil (robust)
+  // =====================================================
+  static uint32_t lastCntIn = 0;
+  static uint32_t closedInPulses = 0;
+  static uint32_t closedInStartMs = 0;
+  
+  if(!wInOn) {   // Einlassventil ZU
+  
+    if(cntIn != lastCntIn) {
+  
+      uint32_t now = millis();
+  
+      // Nachlauf ignorieren
+      if(now - valveClosedTs > FLOW_CLOSED_GRACE_MS) {
+  
+        if(closedInStartMs == 0) {
+          closedInStartMs = now;
+          closedInPulses  = 0;
+        }
+  
+        closedInPulses += (cntIn - lastCntIn);
+  
+        if(closedInPulses > FLOW_CLOSED_MAX_PULSES &&
+           now - closedInStartMs < FLOW_CLOSED_WINDOW_MS)
+        {
+          enterError("Inflow while inlet valve closed");
+        }
+      }
+    }
+  
+  } else {
+    // Ventil offen → Reset
+    closedInPulses = 0;
+    closedInStartMs = 0;
   }
-  lastCntIn=cntIn;
+  
+  lastCntIn = cntIn;
 
-//  if(cntIn > 50 && millis() - stateStart > 3000){
-//    float ratio=(float)cntOut/(float)cntIn;
-//    if(ratio<0.3f) enterError("Bad flow ratio");
-//  }
+  // =====================================================
+  // Flow-Ratio-Überwachung (nur PRODUCTION, verzögert)
+  // =====================================================
+  if(state == PRODUCTION) {
+    // erst nach Anlaufzeit bewerten
+    if(millis() - ratioStartMs > 8000) {   // 8 s Anlauf
+      uint32_t dIn  = cntIn  - ratioStartCntIn;
+      uint32_t dOut = cntOut - ratioStartCntOut;
+      // nur bewerten, wenn überhaupt Durchfluss da ist
+      if(dIn > 30) {
+        float ratio = (float)dOut / (float)dIn;
+        if(ratio < 0.3f) {
+          enterError("Bad flow ratio (<30%)");
+        }
+        // neues Fenster starten
+        ratioStartCntIn  = cntIn;
+        ratioStartCntOut = cntOut;
+        ratioStartMs     = millis();
+      }
+    }
+  }
+
 
   DBG_DBG("STATE=%s raw=%d tds=%.1f in=%lu out=%lu\n",
           sName[state],raw,tds,cntIn,cntOut);
@@ -657,9 +703,37 @@ void loop(){
   // ===== OFF =====
   if(off){
     allOff();
-
+  
+    // laufende Produktion sauber beenden
     if(state == PRODUCTION) {
       stopProduction("User stop");
+    }
+  
+    // alle Anzeige-/Info-Reste löschen
+    autoPauseBlink = false;
+    runtimeTimeoutActive = false;
+    lastErrorMsg = "";
+  
+    // State logisch beenden
+    if(state != IDLE) {
+      setState(IDLE);
+    }
+  }
+
+
+  // =====================================================
+  // Schwimmer-Plausibilität (AUTO, alle States)
+  // =====================================================
+  if(state != ERROR) {
+    bool autoMode = inActive(PIN_SAUTO);
+    if(autoMode) {
+      bool lowSwim  = inActive(PIN_WLOW);
+      bool highSwim = inActive(PIN_WHIGH);
+  
+      // oben Wasser, unten trocken → unmöglich
+      if(highSwim && !lowSwim) {
+        enterError("Level sensor mismatch (upper only)");
+      }
     }
   }
 
@@ -694,7 +768,6 @@ void loop(){
           historyEndProduction(lastStopReason, lastProducedLiters);
           webNotifyHistoryUpdate();
         }
-
         
         setOut(Relay,false);
         setOut(WIn,false);
@@ -707,20 +780,11 @@ void loop(){
 
         bool lowSwim  = inActive(PIN_WLOW);   // schwimmt = true
         bool highSwim = inActive(PIN_WHIGH);  // schwimmt = true
-        /* =========================================
-           Schwimmer-Plausibilität (AUTO)
-           oben Wasser + unten trocken = unmöglich
-          ========================================= */
-        if (autoMode && highSwim && !lowSwim) {
-          enterError("Level sensor mismatch (upper only)");
-          break;
-        }
-
-        
+               
         /* ========= AUTO START nur wenn beide NICHT schwimmen ========= */
         if(autoMode && !manualMode && !autoBlocked)
         {
-          if(!lowSwim && !highSwim)   // ⭐ trocken unten
+          if(!lowSwim && !highSwim)   // trocken unten
             setState(PREPARE);
         }
         
@@ -746,7 +810,7 @@ void loop(){
 
   
       /* ===================================================== */
-     /* ===================================================== */
+      /* ===================================================== */
       case AUTOFLUSH: {
         // Spülen zur S/S (Drain), kein Produkt
         setOut(Relay,true);
@@ -774,7 +838,6 @@ void loop(){
       
         break;
       }
-
   
       /* ===================================================== */
       case PRODUCTION: {
@@ -818,15 +881,12 @@ void loop(){
           enterError("TDS too high");
           break;
         } 
-
-      
       
         /* =========================================================
            Production tracking
            ========================================================= */
         bool isManualMode = manualMode;
-      
-      
+            
         /* =========================================================
            ⭐ LITER LIMIT
            MANUAL → normal fertig
@@ -838,24 +898,20 @@ void loop(){
       
         if(maxProd > 0 && producedLitersSafe() > maxProd)
         {
-          if(isManualMode)   {
+          if (isManualMode) {
             strcpy(lastStopReason, "Volume limit");
             // normaler Abschluss
             if(settings.postFlushEnabled)
               setState(POSTFLUSH);
             else
               setState(IDLE);
-          }
-          else
-          {
+          } else {
             autoBlocked = true;
             enterError("Volume limit");
           }
-      
           break;
         }
-      
-      
+           
         /* =========================================================
            ⭐ RUNTIME LIMIT
            MANUAL → INFO
@@ -865,10 +921,8 @@ void loop(){
             settings.maxRuntimeManualSec :
             settings.maxRuntimeAutoSec;
       
-        if(maxRun > 0 && (millis() - stateStart) > maxRun * 1000)
-        {
-          if(isManualMode)
-          {
+        if(maxRun > 0 && (millis() - stateStart) > maxRun * 1000) {
+          if(isManualMode) {
             runtimeTimeoutActive = true;
             strcpy(lastStopReason, "Max runtime reached");
      
@@ -876,17 +930,12 @@ void loop(){
               setState(POSTFLUSH);
             else
               setState(INFO);
-          }
-          else
-          {
+          } else {
             autoBlocked = true;
             enterError("Max runtime reached");
           }
-      
           break;
         }
-      
-      
         break;
       }
  
@@ -897,9 +946,7 @@ void loop(){
         setOut(WIn,true);     // Rohwasser an
         setOut(OOut,false);   // kein Produkt
         setOut(OtoS,false);   // Osmose vollständig gesperrt
-      
         if(millis() - stateStart > settings.postFlushTimeSec * 1000) {
-
           if(runtimeTimeoutActive) {
             runtimeTimeoutActive = false;
             enterInfo("Max runtime reached");
@@ -907,12 +954,10 @@ void loop(){
             setState(IDLE);
           }
         }
-
         break;
       }
       
       case SERVICEFLUSH: {
-
         /* nur Spülventil */
         setOut(Relay,true);   // Anlage aktiv
         setOut(WIn,true);     // Wasser rein
@@ -940,43 +985,32 @@ void loop(){
     }
   }
 
-
   // ===== MQTT =====
-  
   static uint32_t lastMQTT = 0;
-  
   uint32_t runtimeSec = 0;
   if(state == PRODUCTION)
     runtimeSec = (millis() - productionStartMs) / 1000;
   
   
-    /* ---------- Flow-Berechnung (nur PRODUCTION) ---------- */
-    uint32_t now = millis();
-  
-    if(state == PRODUCTION) {
-
+  /* ---------- Flow-Berechnung (nur PRODUCTION) ---------- */
+  uint32_t now = millis();
+  if(state == PRODUCTION) {
     uint32_t dt = now - flowLastT;
-
     if(dt >= 3000) {
       // OUT
       uint32_t pulsesOut = cntOut - flowLastCnt;
       float dlOut = liters(pulsesOut);
-
       currentFlowLpm = (dlOut > 0)
         ? (dlOut / (dt / 1000.0f)) * 60.0f
         : 0.0f;
-
       flowLastCnt = cntOut;
       flowLastT   = now;
-
       // IN
       uint32_t pulsesIn = cntIn - flowInLastCnt;
       float dlIn = litersIn(pulsesIn);
-
       currentFlowInLpm = (dlIn > 0)
         ? (dlIn / (dt / 1000.0f)) * 60.0f
         : 0.0f;
-
       flowInLastCnt = cntIn;
       flowInLastT   = now;
     }
@@ -986,39 +1020,25 @@ void loop(){
   }
 
   /* ---------- SEND LOGIK ---------- */
-  
   bool sendMQTTnow = false;
-  
   /* State change */
   if(state != lastState) sendMQTTnow = true;
-  
-    
   /* Heartbeat */
   if(millis() - lastMQTT > 10000) sendMQTTnow = true;
-  
   float litersNow =
     (state == PRODUCTION) ? producedLitersSafe() : lastProducedLiters;
 
   /* ---------- Publish ---------- */
-  
   if(sendMQTTnow) {
-    mqttPublish(sName[state],
-                tds,
-                litersNow,
-                currentFlowLpm,
-                runtimeSec);
-  
+    mqttPublish(sName[state], tds, litersNow, currentFlowLpm, runtimeSec);
     lastState = state;
     lastMQTT  = millis();
   }
-
   
   updateLEDs(state);
-  
-  
+
   bool manualActive = inActive(PIN_SMANU);
   String status = buildStatusLine(tds);
   webSetStatus(status.c_str());   
   webLoop(tds, sName[state], litersNow, manualActive, runtimeSec, currentModeStr(), currentFlowLpm, currentFlowInLpm, ESP_VERSION);
-
 }
