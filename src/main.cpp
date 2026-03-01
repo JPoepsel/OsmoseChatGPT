@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.5.2"
+#define ESP_VERSION "ESP v3.7.5"
 
 #define DEBUG_LEVEL 2
 
@@ -19,12 +19,18 @@
 #include <DNSServer.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
+#include <WiFiClientSecure.h>
+
 
 
 #include "web.h"
 #include "config_settings.h"
 #include "history.h"
 #include "settings.h"
+
+
+#define PUSHOVER_TOKEN "xxx"
+#define PUSHOVER_USER  "yyy"
 
 #define TDS_AVG_SAMPLES 8
 
@@ -74,6 +80,9 @@ String lastErrorMsg = "";
 static bool runtimeTimeoutActive = false;
 static bool autoPauseBlink = false;
 
+static uint32_t lastActuatorSwitchMs = 0;
+static bool autoStartNotified = false;
+
 uint32_t productionStartMs = 0;  
 
 static bool autoBlocked = false;   // verhindert Auto-Neustart nach Schutzlimit
@@ -115,9 +124,15 @@ static float tdsSum = 0.0f;
 #define FLOW_CLOSED_MAX_PULSES  10     // erlaubte Impulse danach
 #define FLOW_CLOSED_WINDOW_MS   3000   // Zeitfenster für Bewertung
 
+#define AUTOFLUSH_PRODUCT_INTERVAL_MS 5000  // Pulsperiode bei Atoflush in ms
+#define AUTOFLUSH_PRODUCT_PULSE_MS     100  // Pulsdauer bei Autoflush
+
 
 static bool lastSwitchState = false;   // merken für Flanke
 uint32_t valveClosedTs = 0;
+
+static uint32_t autoflushLastPulseMs = 0;  // Helper für Autoflus-Pulses
+static bool autoflushPulseActive = false;
 
 enum State{
   IDLE,PREPARE,AUTOFLUSH,PRODUCTION,POSTFLUSH,SERVICEFLUSH,INFO,ERROR
@@ -226,6 +241,7 @@ const bool pinInvert[8]={true,true,true,true,true,true,true,true};
 bool wInOn=false;
 
 void setOut(uint8_t p,bool on){
+   lastActuatorSwitchMs = millis();
    if(p==WIn){
     if(wInOn && !on)              // gerade geschlossen
       valveClosedTs = millis();   // Zeit merken
@@ -298,8 +314,47 @@ void mqttReconnect(float tds){
 }
 
 
+void sendPushover(String msg)
+{
+  if(!wifiConnected) {
+    // lastErrorMsg = "PUSH: no wifi";
+    return;
+  }
 
+  WiFiClientSecure client;
+  client.setInsecure();
 
+  if(!client.connect("api.pushover.net", 443)) {
+    // lastErrorMsg = "PUSH: connect failed";
+    return;
+  }
+
+  String body =
+    "token=" PUSHOVER_TOKEN
+    "&user=" PUSHOVER_USER
+    "&title=Osmose"
+    "&message=" + msg;
+
+  client.println("POST /1/messages.json HTTP/1.1");
+  client.println("Host: api.pushover.net");
+  client.println("Connection: close");
+  client.println("Content-Type: application/x-www-form-urlencoded");
+  client.print  ("Content-Length: ");
+  client.println(body.length());
+  client.println();
+  client.print(body);
+
+  // --- HTTP-Status lesen ---
+  uint32_t t0 = millis();
+  while(!client.available() && millis() - t0 < 3000) delay(10);
+
+  if(client.available()) {
+    String line = client.readStringUntil('\n');
+    // lastErrorMsg = "PUSH OK: " + line;
+  } else {
+    // lastErrorMsg = "PUSH: no response";
+  }
+}
 
 
 // ============================================================
@@ -320,13 +375,13 @@ void startWifi(){
   while(WiFi.status()!=WL_CONNECTED && millis()-t<10000) { DBG_INFO("."); delay(200); }
 
   if(WiFi.status()==WL_CONNECTED){
-  Serial.printf(
-    "\n[WIFI]\nIP=%s\nGW=%s\nDNS=%s\nHOST=http://%s.local\n\n",
-    WiFi.localIP().toString().c_str(),
-    WiFi.gatewayIP().toString().c_str(),
-    WiFi.dnsIP().toString().c_str(),
-    settings.mDNSName.c_str()
-  );
+    Serial.printf(
+      "\n[WIFI]\nIP=%s\nGW=%s\nDNS=%s\nHOST=http://%s.local\n\n",
+      WiFi.localIP().toString().c_str(),
+      WiFi.gatewayIP().toString().c_str(),
+      WiFi.dnsIP().toString().c_str(),
+      settings.mDNSName.c_str()
+    );
 
     wifiConnected=true;
     MDNS.begin(settings.mDNSName.c_str());
@@ -436,6 +491,10 @@ void setState(State s)
     productionEnded = true;
   }
 
+  if(s == IDLE) {
+    autoStartNotified = false;
+  }
+
   state = s;
   stateStart = millis();
 
@@ -475,7 +534,8 @@ void enterError(const char* m)
 
   DBG_ERR("[%s] !!! ERROR: %s !!!\n", currentModeStr(), m);
   lastErrorMsg = m;
-
+  sendPushover(m);
+ 
   setState(ERROR);
 }
 
@@ -526,10 +586,23 @@ void setup(){
 
 String buildStatusLine(float tds)
 {
-  char buf[80];
-  snprintf(buf, sizeof(buf),"IN:%lu  OUT:%lu  TDS:%.1f",cntIn,cntOut,tds);
+  bool low  = inActive(PIN_WLOW);
+  bool high = inActive(PIN_WHIGH);
+  bool err  = inActive(PIN_WERROR);
+
+  char buf[120];
+  snprintf(buf, sizeof(buf),
+           "IN:%lu OUT:%lu TDS:%.1f  L:%d H:%d E:%d",
+           cntIn,
+           cntOut,
+           tds,
+           low  ? 1 : 0,
+           high ? 1 : 0,
+           err  ? 1 : 0);
+
   return String(buf);
 }
+
 
 // ============================================================
 // Loop (ORIGINAL + ADD checks)
@@ -632,7 +705,20 @@ void loop(){
 
 
   // ===== ADD: SAFETY =====
-  if(inActive(PIN_WERROR)) enterError("Water error");
+  // =====================================================
+  // WERROR – entprellt / glitchfest
+  // =====================================================
+  static uint32_t werrorSince = 0;
+
+  if(inActive(PIN_WERROR)) {
+    if(werrorSince == 0) {
+      werrorSince = millis();          // Beginn merken
+    } else if(millis() - werrorSince > 100) {
+      enterError("Water error");       // echter Fehler
+    }
+  } else {
+    werrorSince = 0;                   // wieder ruhig
+  }
 
   // =====================================================
   // Einlauf trotz geschlossenem Einlassventil (robust)
@@ -699,9 +785,8 @@ void loop(){
   DBG_DBG("STATE=%s raw=%d tds=%.1f in=%lu out=%lu\n",
           sName[state],raw,tds,cntIn,cntOut);
 
-
   // ===== OFF =====
-  if(off){
+  if(off && state != SERVICEFLUSH){
     allOff();
   
     // laufende Produktion sauber beenden
@@ -709,12 +794,10 @@ void loop(){
       stopProduction("User stop");
     }
   
-    // alle Anzeige-/Info-Reste löschen
     autoPauseBlink = false;
     runtimeTimeoutActive = false;
     lastErrorMsg = "";
   
-    // State logisch beenden
     if(state != IDLE) {
       setState(IDLE);
     }
@@ -784,8 +867,13 @@ void loop(){
         /* ========= AUTO START nur wenn beide NICHT schwimmen ========= */
         if(autoMode && !manualMode && !autoBlocked)
         {
-          if(!lowSwim && !highSwim)   // trocken unten
+          if(!lowSwim && !highSwim) { // trocken unten
+            if(!autoStartNotified) {
+              sendPushover("Osmose Auto-Bezug gestartet");
+              autoStartNotified = true;
+            }
             setState(PREPARE);
+          }
         }
         
         break;
@@ -812,33 +900,55 @@ void loop(){
       /* ===================================================== */
       /* ===================================================== */
       case AUTOFLUSH: {
-        // Spülen zur S/S (Drain), kein Produkt
+        // Grundzustand: Spülen zur Drain
         setOut(Relay,true);
         setOut(WIn,true);
-        setOut(OOut,false);
         setOut(OtoS,true);
-      
-        // Mindest-Spülzeit erfüllt?
+
+        uint32_t now = millis();
+
+        /* ---------- Produkt-Puls starten ---------- */
+        if(!autoflushPulseActive && now - autoflushLastPulseMs >= AUTOFLUSH_PRODUCT_INTERVAL_MS) {
+          autoflushPulseActive = true;
+          autoflushLastPulseMs = now;
+        }
+
+        /* ---------- Produkt-Puls aktiv ---------- */
+        if(autoflushPulseActive) {
+          setOut(OOut,true);   // kurz Produkt freigeben
+
+          if(now - autoflushLastPulseMs >= AUTOFLUSH_PRODUCT_PULSE_MS) {
+            autoflushPulseActive = false;
+            setOut(OOut,false);  // wieder sperren
+          }
+        } else {
+          setOut(OOut,false);
+        }
+
+        /* ---------- Mindest-Spülzeit ---------- */
         bool minFlushDone =
           (millis() - stateStart) >=
           (uint32_t)(settings.autoFlushMinTimeSec * 1000.0f);
-      
-        // Erst nach Mindestzeit darf der TDS-Wert entscheiden
-        if(minFlushDone && tds < settings.tdsLimit) {
+
+        /* ---------- TDS-Entscheidung nur außerhalb des Pulses ---------- */
+        if(minFlushDone && !autoflushPulseActive && tds < settings.tdsLimit) {
+          // Puls-Status sauber zurücksetzen
+          autoflushPulseActive = false;
+          autoflushLastPulseMs = 0;
+
           prodStartCnt = cntOut;
           setState(PRODUCTION);
           break;
         }
-      
-        // Absolute Schutz-Obergrenze
+
+        /* ---------- Absolute Schutzzeit ---------- */
         if(millis() - stateStart > settings.maxFlushTimeSec * 1000.0f) {
           enterError("Flush timeout");
           break;
         }
-      
+
         break;
       }
-  
       /* ===================================================== */
       case PRODUCTION: {
 
@@ -877,10 +987,9 @@ void loop(){
         /* =========================================================
            TDS Limit
            ========================================================= */
-        if(state == PRODUCTION && tds > settings.tdsMaxAllowed) {
+        if(state == PRODUCTION &&  millis() - lastActuatorSwitchMs > 500 && tds > settings.tdsMaxAllowed) {
           enterError("TDS too high");
-          break;
-        } 
+        }
       
         /* =========================================================
            Production tracking
