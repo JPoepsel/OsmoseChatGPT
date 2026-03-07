@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.8.0"
+#define ESP_VERSION "ESP v3.8.1"
 
 #define DEBUG_LEVEL 2
 
@@ -522,7 +522,7 @@ void stopProduction(const char* reason)
 void enterError(const char* m)
 {
   // laufende Produktion sauber abschließen
-  if(state == PRODUCTION) {
+  if(state == PRODUCTION || state == PREPARE) {
     lastProducedLiters = producedLitersSafe();
     productionEnded = false;   // ⬅ wichtig: wir schreiben JETZT
     strncpy(lastStopReason, m, sizeof(lastStopReason)-1);
