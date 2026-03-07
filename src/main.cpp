@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.7.5"
+#define ESP_VERSION "ESP v3.8.0"
 
 #define DEBUG_LEVEL 2
 
@@ -29,8 +29,8 @@
 #include "settings.h"
 
 
-#define PUSHOVER_TOKEN "xxx"
-#define PUSHOVER_USER  "yyy"
+#define PUSHOVER_TOKEN "a17cuw3ujrekv8badbjk9f59i1o663"
+#define PUSHOVER_USER  "u5if6n9see17t7c42ny8id7fqegtkv"
 
 #define TDS_AVG_SAMPLES 8
 
@@ -241,7 +241,7 @@ const bool pinInvert[8]={true,true,true,true,true,true,true,true};
 bool wInOn=false;
 
 void setOut(uint8_t p,bool on){
-   lastActuatorSwitchMs = millis();
+   if(p <= Relay) lastActuatorSwitchMs = millis();
    if(p==WIn){
     if(wInOn && !on)              // gerade geschlossen
       valveClosedTs = millis();   // Zeit merken
@@ -612,8 +612,8 @@ void loop(){
   int raw=analogRead(PIN_TDS_ADC);
   float tds=rawToTds(raw);
  
-
-  dnsServer.processNextRequest();
+  if(!wifiConnected)
+    dnsServer.processNextRequest();
 
   mqttReconnect(tds);
   mqtt.loop();
@@ -788,7 +788,8 @@ void loop(){
   // ===== OFF =====
   if(off && state != SERVICEFLUSH){
     allOff();
-  
+    lastSwitchState = false; 
+
     // laufende Produktion sauber beenden
     if(state == PRODUCTION) {
       stopProduction("User stop");
@@ -837,7 +838,7 @@ void loop(){
     }
   }
   // ===== StateMachine =====
-  if(!off){
+  if(!off || state == SERVICEFLUSH){
   
     switch(state) {
   
