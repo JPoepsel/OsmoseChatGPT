@@ -13,10 +13,12 @@ void historySetUpdateCallback(HistoryUpdateCallback cb);
 
 void historyInit();
 
-enum HistorySeries {
+enum HistorySeries{
   HIST_2S,
   HIST_30S,
-  HIST_600S
+  HIST_600S,
+  HIST_3600S,
+  HIST_21600S
 };
 
 void historyAddSample2s(float tds,

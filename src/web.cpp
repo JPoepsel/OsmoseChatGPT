@@ -356,9 +356,11 @@ server.on("/api/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req){
       String s = req->getParam("series")->value();
       HistorySeries type;
 
-      if(s == "2s")       type = HIST_2S;
-      else if(s == "30s") type = HIST_30S;
-      else if(s == "600s")type = HIST_600S;
+      if(s == "2s")          type = HIST_2S;
+      else if(s == "30s")    type = HIST_30S;
+      else if(s == "600s")   type = HIST_600S;
+      else if(s == "3600s")  type = HIST_3600S;
+      else if(s =="21600s")  type = HIST_21600S;
       else {
         req->send(400, "text/plain", "invalid series");
         return;

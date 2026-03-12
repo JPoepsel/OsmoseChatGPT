@@ -9,14 +9,14 @@
 #define DEF_PULSES_PER_LITER_OUT     880.0f
 
 // Process
-#define DEF_TDS_LIMIT                13.0f
+#define DEF_TDS_LIMIT                17.0f
 #define DEF_TDS_MAX_ALLOWED          30.0f
 
 #define DEF_MAX_RUNTIME_AUTO_SEC     2400.0f
 #define DEF_MAX_RUNTIME_MANUAL_SEC   3000.0f
 
-#define DEF_MAX_PROD_AUTO_L          35.0f
-#define DEF_MAX_PROD_MANUAL_L        45.0f
+#define DEF_MAX_PROD_AUTO_L          25.0f
+#define DEF_MAX_PROD_MANUAL_L        50.0f
 
 // System
 #define DEF_MQTT_PORT               1883
@@ -39,4 +39,4 @@
 
 #define DEF_SERVICE_FLUSH_ENABLED     true
 #define DEF_SERVICE_FLUSH_INTERVAL_S  86400  //24h
-#define DEF_SERVICE_FLUSH_TIME_S      60
+#define DEF_SERVICE_FLUSH_TIME_S      120

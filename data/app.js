@@ -1,4 +1,4 @@
-const SPIFF_VERSION = "WEB v3.4.3";
+const SPIFF_VERSION = "WEB v3.9.0";
 
 /* ============================================================
    GLOBALS
@@ -11,6 +11,13 @@ let histTimer;
 let lastMdnsName = "";
 let lastState    = "";
 
+const RANGE_SECONDS = {
+  "2s": 2,
+  "30s": 30,
+  "600s": 600,
+  "3600s": 3600,
+  "21600s": 21600
+};
 
 /* ============================================================
    SMALL TOAST
@@ -338,7 +345,10 @@ function initHistory()
       animation:false,
       responsive:true,
       scales:{
-        yTds:{  type:"linear", position:"left",  title:{display:true,text:"ppm"},  ticks:{color:"#00bcd4"} },
+        x:    { type:"time", time:{ tooltipFormat:"HH:mm", 
+                                    displayFormats:{ second:"HH:mm:ss", minute:"HH:mm", 
+                                                     hour:"dd.MM HH:mm", day:"dd.MM" } } },
+        yTds: { type:"linear", position:"left",  title:{display:true,text:"ppm"},  ticks:{color:"#00bcd4"} },
         yFlow:{ type:"linear", position:"right", title:{display:true,text:"L/min"},ticks:{color:"#4caf50"} },
         yProd:{ type:"linear", position:"right", offset:true, title:{display:true,text:"Liter"}, ticks:{color:"#ff9800"} }
       }
@@ -368,7 +378,13 @@ function loadHistory(force=false)
     {
       const len = d.tds.length;
 
-      chart.data.labels = Array(len).fill("");
+      const step = RANGE_SECONDS[series] || 2;
+      const now = Date.now();
+      const labels = [];
+      for(let i=0;i<len;i++)
+        labels.push(new Date(now - (len-i-1)*step*1000));
+      chart.data.labels = labels;
+
       chart.data.datasets[0].data = d.tds;
       chart.data.datasets[1].data = d.flow;
       chart.data.datasets[2].data = d.prod;

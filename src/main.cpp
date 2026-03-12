@@ -4,7 +4,7 @@
   100% deine Originaldatei
   nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.8.1"
+#define ESP_VERSION "ESP v3.9.0"
 
 #define DEBUG_LEVEL 2
 
@@ -1077,10 +1077,15 @@ void loop(){
         if(millis() - stateStart > settings.serviceFlushTimeSec * 1000) {
           setOut(OtoS,false);
           lastServiceFlushMs = millis();
-          if(lastErrorMsg.length())   // wenn Info aktiv war, diese nach dem Flush wiederherstellen
-            setState(INFO);           
-          else
-            setState(IDLE);
+          /* optional Postflush nach ServiceFlush */
+          if(settings.postFlushEnabled) {
+            setState(POSTFLUSH);
+          } else {
+            if(lastErrorMsg.length())   // wenn Info aktiv war, diese nach dem Flush wiederherstellen
+              setState(INFO);           
+            else
+              setState(IDLE);
+          }
         }
       
         break;

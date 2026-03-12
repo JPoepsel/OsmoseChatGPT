@@ -9,6 +9,8 @@
 #define HIST_2S_COUNT    150     // ~5 Minuten
 #define HIST_30S_COUNT   150     // ~75 Minuten
 #define HIST_600S_COUNT  150     // ~25 Stunden
+#define HIST_3600S_COUNT 168     // 7 Tage
+#define HIST_21600S_COUNT 120    // ~30 Tage
 
 /* ============================================================
    SERIES BUFFERS (RAM, FIXED SIZE, ZERO-FILLED)
@@ -26,9 +28,19 @@ static float tds600s[HIST_600S_COUNT];
 static float flow600s[HIST_600S_COUNT];
 static float prod600s[HIST_600S_COUNT];
 
+static float tds3600s[HIST_3600S_COUNT];
+static float flow3600s[HIST_3600S_COUNT];
+static float prod3600s[HIST_3600S_COUNT];
+
+static float tds21600s[HIST_21600S_COUNT];
+static float flow21600s[HIST_21600S_COUNT];
+static float prod21600s[HIST_21600S_COUNT];
+
 static uint16_t idx2s   = 0;
 static uint16_t idx30s  = 0;
 static uint16_t idx600s = 0;
+static uint16_t idx3600s = 0;
+static uint16_t idx21600s = 0;
 
 static uint32_t last2sMs = 0;
 
@@ -40,6 +52,14 @@ static uint8_t accCnt30 = 0;
 static float accTds600    = 0;
 static float accFlow600   = 0;
 static uint16_t accCnt600 = 0;
+
+static float accTds3600=0;
+static float accFlow3600=0;
+static uint16_t accCnt3600=0;
+
+static float accTds21600=0;
+static float accFlow21600=0;
+static uint16_t accCnt21600=0;
 
 /* ============================================================
    TABLE (persistent, UNCHANGED)
@@ -178,6 +198,40 @@ void historyAddSample2s(float tds,
     accTds600 = accFlow600 = 0;
     accCnt600 = 0;
   }
+
+  /* --- 3600s aggregation (1800 × 2s) --- */
+  accTds3600 += tds;
+  accFlow3600 += flowOutLpm;
+  accCnt3600++;
+
+  if(accCnt3600 >= 1800) {
+
+    tds3600s[idx3600s]  = accTds3600 / accCnt3600;
+    flow3600s[idx3600s] = accFlow3600 / accCnt3600;
+    prod3600s[idx3600s] = produced;
+
+    idx3600s = (idx3600s + 1) % HIST_3600S_COUNT;
+
+    accTds3600 = accFlow3600 = 0;
+    accCnt3600 = 0;
+  }
+
+  /* --- 21600s aggregation (10800 × 2s) --- */
+  accTds21600 += tds;
+  accFlow21600 += flowOutLpm;
+  accCnt21600++;
+
+  if(accCnt21600 >= 10800) {
+
+    tds21600s[idx21600s]  = accTds21600 / accCnt21600;
+    flow21600s[idx21600s] = accFlow21600 / accCnt21600;
+    prod21600s[idx21600s] = produced;
+
+    idx21600s = (idx21600s + 1) % HIST_21600S_COUNT;
+
+    accTds21600 = accFlow21600 = 0;
+    accCnt21600 = 0;
+  }
 }
 
 
@@ -198,15 +252,21 @@ String historyGetSeriesJson(HistorySeries s)
   if(s == HIST_2S) {
     tdsArr = tds2s; flowArr = flow2s; prodArr = prod2s;
     count = HIST_2S_COUNT; idx = idx2s;
-  }
-  else if(s == HIST_30S) {
+  } else if(s == HIST_30S) {
     tdsArr = tds30s; flowArr = flow30s; prodArr = prod30s;
     count = HIST_30S_COUNT; idx = idx30s;
-  }
-  else {
+  } else if(s == HIST_600S) {
     tdsArr = tds600s; flowArr = flow600s; prodArr = prod600s;
     count = HIST_600S_COUNT; idx = idx600s;
+  } else if(s == HIST_3600S) {
+    tdsArr = tds3600s; flowArr = flow3600s; prodArr = prod3600s;
+    count = HIST_3600S_COUNT; idx = idx3600s;
+  } else /*if(s == HIST_21600S)*/ {
+    tdsArr = tds21600s; flowArr = flow21600s; prodArr = prod21600s;
+    count = HIST_21600S_COUNT; idx = idx21600s;
   }
+
+
 
   for(uint16_t i = 0; i < count; i++) {
     uint16_t k = (idx + i) % count;
