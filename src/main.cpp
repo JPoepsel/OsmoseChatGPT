@@ -1,10 +1,7 @@
 /*********************************************************************
   OSMOSE CONTROLLER – V3.0 CLEAN ADDITIVE
-
-  100% deine Originaldatei
-  nur additive Settings-Integration
 *********************************************************************/
-#define ESP_VERSION "ESP v3.9.0"
+#define ESP_VERSION "ESP v3.9.2"
 
 #define DEBUG_LEVEL 2
 
@@ -552,7 +549,56 @@ void hardResetToIdle()
   setState(IDLE);   // ✅ nur das!
 }
 
+void handleWifi()
+{
+  static uint32_t lastCheck = 0;
 
+  if(millis() - lastCheck < 5000) return;   // alle 5 Sekunden
+  lastCheck = millis();
+
+  wl_status_t s = WiFi.status();
+
+  // ===============================
+  // Verbindung verloren
+  // ===============================
+  if(s != WL_CONNECTED && wifiConnected)
+  {
+    DBG_ERR("[WiFi] LOST\n");
+    wifiConnected = false;
+  }
+
+  // ===============================
+  // Wieder verbunden
+  // ===============================
+  if(s == WL_CONNECTED && !wifiConnected)
+  {
+    DBG_INFO("[WiFi] RECONNECTED\n");
+    wifiConnected = true;
+
+    MDNS.begin(settings.mDNSName.c_str());
+
+    configTime(GMT_OFFSET, DST_OFFSET, NTP_SERVER);
+
+    mqtt.setServer(
+      settings.mqttHost.c_str(),
+      settings.mqttPort
+    );
+  }
+
+  // ===============================
+  // aktiv neu verbinden
+  // ===============================
+  if(s != WL_CONNECTED)
+  {
+    DBG_INFO("[WiFi] reconnect...\n");
+
+    WiFi.disconnect();
+    WiFi.begin(
+      settings.wifiSSID.c_str(),
+      settings.wifiPassword.c_str()
+    );
+  }
+}
 
 
 // ============================================================
@@ -610,6 +656,8 @@ String buildStatusLine(float tds)
 void loop(){
 
   int raw=analogRead(PIN_TDS_ADC);
+  handleWifi();
+
   float tds=rawToTds(raw);
  
   if(!wifiConnected)
@@ -771,7 +819,7 @@ void loop(){
       if(dIn > 30) {
         float ratio = (float)dOut / (float)dIn;
         if(ratio < 0.3f) {
-          enterError("Bad flow ratio (<30%)");
+          enterError("Bad flow ratio (<30%%)");
         }
         // neues Fenster starten
         ratioStartCntIn  = cntIn;
